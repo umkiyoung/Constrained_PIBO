@@ -290,29 +290,4 @@ if __name__ == "__main__":
             f"./baselines/results/pibo/pibo_{task}_{dim}_{seed}_{n_init}_{args.batch_size}_{args.buffer_size}_{args.local_search_epochs}_{args.num_ensembles}_{args.max_evals}_{save_len}.npy",
             np.array(save_np),
         )
-        # if len(Y_total) >= 1000:
-        #     save_len = min(len(Y_total) // 1000 * 1000, args.max_evals)
-        #     save_np = Y_total[:save_len]
-        
-        #     if args.ablation == "":
-        #         if not os.path.exists(f"./baselines/results/pibo"):
-        #             os.makedirs(f"./baselines/results/pibo", exist_ok=True)
-        #         np.save(
-        #             f"./baselines/results/pibo/pibo_{task}_{dim}_{seed}_{n_init}_{args.batch_size}_{args.buffer_size}_{args.local_search_epochs}_{args.max_evals}_{save_len}.npy",
-        #             np.array(save_np),
-        #         )
-        #     else:
-        #         if not os.path.exists(f"./baselines/results/ablations"):
-        #             os.makedirs(f"./baselines/results/ablations", exist_ok=True)
-        #         if not os.path.exists(f"./baselines/results/ablations/{args.ablation}"):
-        #             os.makedirs(f"./baselines/results/ablations/{args.ablation}", exist_ok=True)
-        #         if args.uncertainty_estimation == "ensemble":
-        #             np.save(
-        #                 f"./baselines/results/ablations/{args.ablation}/{task}_{dim}_{seed}_{n_init}_{args.batch_size}_{args.buffer_size}_{args.diffusion_steps}_{args.alpha}_{args.gamma}_{args.num_ensembles}_{args.local_search}_{args.local_search_epochs}_{args.reweighting}_{args.filtering}_{args.training_posterior}_{args.num_proposals}_{args.num_posterior_epochs}_{args.max_evals}_{save_len}.npy",
-        #                 np.array(save_np),
-        #             )
-        #         else:
-        #             np.save(
-        #                 f"./baselines/results/ablations/{args.ablation}/{task}_{dim}_{seed}_{n_init}_{args.batch_size}_{args.buffer_size}_{args.diffusion_steps}_{args.alpha}_{args.gamma}_{args.num_ensembles}_{args.local_search}_{args.local_search_epochs}_{args.reweighting}_{args.filtering}_{args.training_posterior}_{args.num_proposals}_{args.num_posterior_epochs}_{args.uncertainty_estimation}_{args.max_evals}_{save_len}.npy",
-        #                 np.array(save_np),
-        #             )
+

@@ -1,14 +1,14 @@
-# Posterior Inference with Diffusion Models for High-dimensional Black-box Optimization (DiBO)
+# Posterior Inference with Outsoursed Diffusion Models for High-Dimensional Constrained Black-box Optimization (PIOD-CBO)
 
 ## Installation Guide
 
-To ensure that the DIBO repository is included in your Python path, add the following line to your shell configuration file (e.g., `.bashrc`, `.zshrc`):
+To ensure that the PIBO repository is included in your Python path, add the following line to your shell configuration file (e.g., `.bashrc`, `.zshrc`):
 ```bash
 nano ~./bashrc #open shell configuration
 ```
 ```bash
 #Example:
-export PYTHONPATH=/home/name/DIBO:$PYTHONPATH
+export PYTHONPATH=/home/name/PIBO:$PYTHONPATH
 ```
 
 After adding the line, reload the shell configuration:
@@ -17,13 +17,13 @@ After adding the line, reload the shell configuration:
 source ~/.bashrc  # or source ~/.zshrc
 ```
 
-Or add lines ```export PYTHONPATH=/home/name/DIBO:$PYTHONPATH```  the top of the [baselines/scripts/dibo](baselines/scripts/dibo.sh) files.
+Or add lines ```export PYTHONPATH=/home/name/PIBO:$PYTHONPATH```  the top of the [baselines/scripts/pibo](baselines/scripts/pibo.sh) files.
 
 ### Environment settings
 ```bash
 # Create conda environment
-conda create -n dibo python=3.9 -y
-conda activate dibo
+conda create -n pibo python=3.9 -y
+conda activate pibo
 
 # Mujoco Installation (Mujoco should be already placed in ~/.mujoco)
 pip install Cython==0.29.36 numpy==1.22.0 mujoco_py==2.1.2.14
@@ -52,7 +52,7 @@ pip install --upgrade gym
 Run examples:
 
 ```bash
-sh baselines/scripts/dibo.sh
+sh baselines/scripts/pibo.sh
 ```
 
 All the settings are written in the [baselines/scripts](baselines/scripts) folder.
