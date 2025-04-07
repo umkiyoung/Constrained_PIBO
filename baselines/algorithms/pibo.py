@@ -50,8 +50,8 @@ if __name__ == "__main__":
         os.makedirs("./baselines/results")
     if not os.path.exists("./baselines/results/pibo"):
         os.makedirs("./baselines/results/pibo")
-    # wandb.init(project="pibo",
-    #            config=vars(args))
+    wandb.init(project="pibo",
+               config=vars(args))
     
     task = args.task
     dim = args.dim
@@ -266,14 +266,17 @@ if __name__ == "__main__":
         X_total = np.concatenate([X_total, X_sample_unnorm.cpu().numpy()], axis=0)
         Y_total = np.concatenate([Y_total, Y_sample_unnorm.cpu().numpy()], axis=0)
         
-        # wandb.log({"round": round, 
-        #            "max_in_this_round": Y_sample_unnorm.max().item(), 
-        #            "max_so_far": test_function.Y.max().item(),
-        #            "time_taken": time.time() - start_time,
-        #            "num_samples": X_total.shape[0],
-        #            "beta": beta,
-        #            "histogram": wandb.Histogram(Y_sample_unnorm.cpu().numpy().flatten())
-        #         })
+        wandb.log({
+            "Round": round + 1,
+            "Max so far": test_function.Y.max().item(),
+            "Max in this round": Y_sample_unnorm.max().item(),
+            "Min Constraint so far": test_function.C.min().item(),
+            "Min Constraint in this round": C_sample_unnorm.min().item(),
+            "Max Log rewards": proxy_model_ens.log_reward(test_function.X).max().item(),
+            "Max True score": test_function.true_score.max().item(),
+            "Time taken": time.time() - start_time,
+            "Seed": seed,
+        })
         
         
         # if len(Y_total) >= 1000:
