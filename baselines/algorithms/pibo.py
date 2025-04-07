@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from baselines.models.diffusion import QFlow, DiffusionModel
 from baselines.functions.test_function import TestFunction
-from baselines.models.value_functions import ProxyEnsemble, ProxyMCDropout, Proxy 
+from baselines.models.value_functions import ProxyEnsemble, Proxy 
 from baselines.utils import set_seed, get_value_based_weights, get_rank_based_weights
 import wandb
 
@@ -33,12 +33,12 @@ if __name__ == "__main__":
     parser.add_argument("--diffusion_steps", type=int, default=30)
     parser.add_argument("--proxy_hidden_dim", type=int, default=256)
     parser.add_argument("--gamma", type=float, default=1.0)
+    parser.add_argument("--lamb", type=float, default=1.0)
     parser.add_argument("--num_ensembles", type=int, default=5)
     parser.add_argument("--reweighting", type=str, default="exp") # exp, uniform, value, rank
     parser.add_argument("--filtering", type=str, default='True') # True, False
     parser.add_argument("--num_proposals", type=int, default=10)
     parser.add_argument("--training_posterior", type=str, default='both') # both, on, off
-    parser.add_argument("--uncertainty_estimation", type=str, default='ensemble') # ensemble, dropout, None
     parser.add_argument("--ablation", type=str, default="")
     parser.add_argument("--reward_sampler", type=str, default="False")
     args = parser.parse_args()
@@ -49,8 +49,8 @@ if __name__ == "__main__":
         os.makedirs("./baselines/results")
     if not os.path.exists("./baselines/results/pibo"):
         os.makedirs("./baselines/results/pibo")
-    wandb.init(project="DiBO",
-               config=vars(args))
+    # wandb.init(project="pibo",
+    #            config=vars(args))
     
     task = args.task
     dim = args.dim
@@ -64,7 +64,10 @@ if __name__ == "__main__":
     set_seed(seed)
 
     test_function = TestFunction(task = task, dim = dim, n_init = n_init, seed = seed, dtype=dtype, device=device)
-
+    test_function.get_initial_points()
+    test_function.true_score = torch.tensor([test_function.eval_score(x) for x in test_function.X], dtype=dtype, device=device).unsqueeze(-1)
+    
+       
     num_rounds = (args.max_evals - n_init) // batch_size
     #num_epochs = args.num_epochs
     num_proxy_epochs = args.num_proxy_epochs
@@ -73,8 +76,13 @@ if __name__ == "__main__":
     
     X_total = test_function.X.cpu().numpy()
     Y_total = test_function.Y.cpu().numpy()
-    print(test_function.X.shape)
+    C_total = test_function.C.cpu().numpy()
+
     print(test_function.Y.shape)
+    print(test_function.C.shape)
+    
+    dim_c = test_function.C.shape[1]
+    
     for round in range(num_rounds):
         start_time = time.time()
         test_function.X_mean = test_function.X.mean(dim=0)
@@ -83,61 +91,41 @@ if __name__ == "__main__":
         test_function.Y_mean = test_function.Y.mean()
         test_function.Y_std = test_function.Y.std()
         
+        test_function.C_mean = test_function.C.mean(dim=0)
+        test_function.C_std = test_function.C.std(dim=0)
+        
         # Re-weighting for the training set (it seems cruical for the performance)
         # Prior implementation is for offline setting, so we should consider low-scoring regions to prevent deviation from the offline dataset
         # However, it is not necessary for online setting
-        if args.reweighting == "uniform":
-            weights = torch.ones_like(test_function.Y.squeeze())
-        elif args.reweighting == "value":
-            weights = get_value_based_weights(test_function.Y.cpu().numpy(), temp="90")
-            weights = torch.tensor(weights, dtype=dtype, device=device).squeeze()
-        elif args.reweighting == "rank":
-            weights = get_rank_based_weights(test_function.Y.squeeze().cpu().numpy())
-        else: #TODO Ours. exp.
-            weights = torch.exp((test_function.Y.squeeze() - test_function.Y.mean()) / (test_function.Y.std() + 1e-7))
+        weights = torch.exp((test_function.Y.squeeze() - test_function.Y.mean()) / (test_function.Y.std() + 1e-7))
             
-        # weights = torch.ones_like(test_function.Y.squeeze())
         sampler = WeightedRandomSampler(weights, len(weights), replacement=True)
         data_loader = DataLoader(test_function, batch_size=train_batch_size, sampler=sampler)
         
-        # proxy_model = Proxy(x_dim=dim, hidden_dim=128, dropout_prob=0.1, num_hidden_layers=2).to(dtype=dtype, device=device)
-        if args.uncertainty_estimation == "ensemble":
-            proxy_model_ens = ProxyEnsemble(x_dim=dim, hidden_dim=args.proxy_hidden_dim, num_hidden_layers=3, n_ensembles=args.num_ensembles, ucb_reward=True).to(dtype=dtype, device=device)
-            proxy_model_ens.gamma = args.gamma
-            for proxy_model in proxy_model_ens.models:
-                proxy_model_optimizer = torch.optim.Adam(proxy_model.parameters(), lr=1e-3)
-                for epoch in tqdm(range(num_proxy_epochs), dynamic_ncols=True):
-                    total_loss = 0.0
-                    for x, y in data_loader:
-                        x = (x - test_function.X_mean) / (test_function.X_std + 1e-7)
-                        x += torch.randn_like(x) * 0.001
-                        y = (y - test_function.Y_mean) / (test_function.Y_std + 1e-7)
-                        proxy_model_optimizer.zero_grad()
-                        loss = proxy_model.compute_loss(x, y)
-                        loss.backward()
-                        proxy_model_optimizer.step()
-                        total_loss += loss.item()
-        else:
-            if args.uncertainty_estimation == "dropout":
-                proxy_model_ens = ProxyMCDropout(x_dim=dim, hidden_dim=args.proxy_hidden_dim, num_hidden_layers=3, dropout_rate=0.1, dtype=dtype).to(dtype=dtype, device=device)
-                proxy_model_ens.gamma = args.gamma
-            else:
-                proxy_model_ens = Proxy(x_dim=dim, hidden_dim=args.proxy_hidden_dim, num_hidden_layers=3).to(dtype=dtype, device=device)
-                proxy_model_ens.gamma = 0.0 
-                proxy_model_optimizer = torch.optim.Adam(proxy_model_ens.parameters(), lr=1e-3)
-                for epoch in tqdm(range(num_proxy_epochs), dynamic_ncols=True):
-                    total_loss = 0.0
-                    for x, y in data_loader:
-                        x = (x - test_function.X_mean) / (test_function.X_std + 1e-7)
-                        x += torch.randn_like(x) * 0.001
-                        y = (y - test_function.Y_mean) / (test_function.Y_std + 1e-7)
-                        proxy_model_optimizer.zero_grad()
-                        loss = proxy_model_ens.compute_loss(x, y)
-                        loss.backward()
-                        proxy_model_optimizer.step()
-                        total_loss += loss.item()
-        print(f"Round: {round+1}\tProxy model trained")
+        proxy_model_ens = ProxyEnsemble(x_dim=dim, hidden_dim=args.proxy_hidden_dim, output_dim=1 + dim_c, 
+                                        num_hidden_layers=3, n_ensembles=args.num_ensembles, ucb_reward=True, constraint_formulation="Lagrangian",
+                                        lamb=args.lamb).to(dtype=dtype, device=device)
+        proxy_model_ens.gamma = args.gamma
+
         
+        for proxy_model in proxy_model_ens.models:
+            proxy_model_optimizer = torch.optim.Adam(proxy_model.parameters(), lr=1e-3)
+            
+            for epoch in tqdm(range(num_proxy_epochs), dynamic_ncols=True):
+                total_loss = 0.0
+                for x, y, c in data_loader:
+                    x = (x - test_function.X_mean) / (test_function.X_std + 1e-7)
+                    x += torch.randn_like(x) * 0.001
+                    y = (y - test_function.Y_mean) / (test_function.Y_std + 1e-7)
+                    c = test_function.normalizing_constraints(c, test_function.C_mean, test_function.C_std)
+                    # c = (c - test_function.C_mean) / (test_function.C_std + 1e-7)
+                    proxy_model_optimizer.zero_grad()
+                    loss = proxy_model.compute_loss(x, y, c)
+                    loss.backward()
+                    proxy_model_optimizer.step()
+                    total_loss += loss.item()
+
+        print(f"Round: {round+1}\tProxy model trained")
         
         # There is no big difference in the performance with different diffusion steps
         prior_model = DiffusionModel(x_dim=dim, diffusion_steps=args.diffusion_steps).to(dtype=dtype, device=device)
@@ -145,7 +133,7 @@ if __name__ == "__main__":
         prior_model_optimizer = torch.optim.Adam(prior_model.parameters(), lr=1e-3)
         for epoch in tqdm(range(num_prior_epochs), dynamic_ncols=True):
             total_loss = 0.0
-            for x, y, in data_loader:
+            for x, y, c in data_loader:
                 x = (x - test_function.X_mean) / (test_function.X_std + 1e-7)
                 x += torch.randn_like(x) * 0.001
                 prior_model_optimizer.zero_grad()
@@ -253,11 +241,19 @@ if __name__ == "__main__":
         X_sample_unnorm = X_sample * test_function.X_std + test_function.X_mean
         X_sample_unnorm = torch.clamp(X_sample_unnorm, 0.0, 1.0)
         Y_sample_unnorm = torch.tensor([test_function.eval_objective(x) for x in X_sample_unnorm], dtype=dtype, device=device).unsqueeze(-1)        
-        print(f"Round: {round+1}\tSeed: {seed}\tMax in this round: {Y_sample_unnorm.max().item():.3f}")
+        C_sample_unnorm = torch.cat([test_function.eval_constraints(x) for x in X_sample_unnorm], dim=0).to(dtype).to(device)
+        # print(f"Round: {round+1}\tSeed: {seed}\tMax in this round: {Y_sample_unnorm.max().item():.3f}")
+        true_score = torch.tensor([test_function.eval_score(x) for x in X_sample_unnorm], dtype=dtype, device=device).unsqueeze(-1)
+        print(f"Round: {round+1}\tSeed: {seed}\tMax in this round: {Y_sample_unnorm.max().item():.3f}\tMin Constraint: {C_sample_unnorm.min().item():.3f}\t Log_rewards: {proxy_model_ens.log_reward(X_sample_unnorm).max().item():.3f}\t True score: {true_score.max().item():.3f}")
         
         test_function.X = torch.cat([test_function.X, X_sample_unnorm], dim=0)
         test_function.Y = torch.cat([test_function.Y, Y_sample_unnorm], dim=0)
-        print(f"Round: {round+1}\tMax so far: {test_function.Y.max().item():.3f}")
+        test_function.C = torch.cat([test_function.C, C_sample_unnorm], dim=0)
+        
+        test_function.true_score = torch.cat([test_function.true_score, true_score], dim=0)
+        print(f"Round: {round+1}\tSeed: {seed}\tMax so far: {test_function.Y.max().item():.3f}\tMin Constraint: {test_function.C.min().item():.3f}\t Log_rewards: {proxy_model_ens.log_reward(test_function.X).max().item():.3f}\t True score: {test_function.true_score.max().item():.3f}")
+        # print(f"Round: {round+1}\tMax so far: {test_function.Y.max().item():.3f}")
+        
         print(f"Time taken: {time.time() - start_time:.3f} seconds")
         print()
         
@@ -269,14 +265,14 @@ if __name__ == "__main__":
         X_total = np.concatenate([X_total, X_sample_unnorm.cpu().numpy()], axis=0)
         Y_total = np.concatenate([Y_total, Y_sample_unnorm.cpu().numpy()], axis=0)
         
-        wandb.log({"round": round, 
-                   "max_in_this_round": Y_sample_unnorm.max().item(), 
-                   "max_so_far": test_function.Y.max().item(),
-                   "time_taken": time.time() - start_time,
-                   "num_samples": X_total.shape[0],
-                   "beta": beta,
-                   "histogram": wandb.Histogram(Y_sample_unnorm.cpu().numpy().flatten())
-                })
+        # wandb.log({"round": round, 
+        #            "max_in_this_round": Y_sample_unnorm.max().item(), 
+        #            "max_so_far": test_function.Y.max().item(),
+        #            "time_taken": time.time() - start_time,
+        #            "num_samples": X_total.shape[0],
+        #            "beta": beta,
+        #            "histogram": wandb.Histogram(Y_sample_unnorm.cpu().numpy().flatten())
+        #         })
         
         
         # if len(Y_total) >= 1000:
