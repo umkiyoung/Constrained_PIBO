@@ -5,7 +5,7 @@ export PYTHONPATH=/home/uky/repos_python/Research/Constrained_PIBO:$PYTHONPATH
 for seed in 3; do
    CUDA_VISIBLE_DEVICES=$seed python baselines/algorithms/pibo.py --task Ackley --dim 200 --batch_size 100\
        --n_init 200 --max_evals 10000 --seed $seed --num_proxy_epochs 50 --num_prior_epochs 50 --num_posterior_epochs 50\
-       --local_search True --alpha 1e-5 --lamb 10 --local_search_epochs 10 --diffusion_steps 30 --buffer_size 500&
+       --local_search True --alpha 1e-5 --lamb 10 --constraint_formulation Lagrangian --local_search_epochs 10 --diffusion_steps 30 --buffer_size 500&
 done
 wait
 # #Synthetic

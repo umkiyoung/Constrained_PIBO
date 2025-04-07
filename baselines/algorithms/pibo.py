@@ -41,6 +41,7 @@ if __name__ == "__main__":
     parser.add_argument("--training_posterior", type=str, default='both') # both, on, off
     parser.add_argument("--ablation", type=str, default="")
     parser.add_argument("--reward_sampler", type=str, default="False")
+    parser.add_argument("--constraint_formulation", type=str, default="Lagrangian") # Soft, LogBarrier, Lagrangian
     args = parser.parse_args()
 
     
