@@ -50,10 +50,12 @@ def train_step(energy, gfn_model, gfn_optimizer, it, exploratory, buffer, buffer
     return loss #loss.item()
 
 def fwd_train_step(prior, energy, gfn_model, exploration_std, args, device, return_exp=False):
-    init_state = torch.zeros(args.batch_size, energy.data_ndim).to(device)
+    # init_state = torch.zeros(args.batch_size, energy.data_ndim).to(device)
+    init_state = torch.zeros(args.batch_size, args.dim).to(device)
     coeff_matrix = cal_subtb_coef_matrix(args.subtb_lambda, args.T).to(device) # 추가
     loss = get_gfn_forward_loss(prior, args.mode_fwd, init_state, gfn_model, energy.log_reward, coeff_matrix,
                                 exploration_std=exploration_std, return_exp=return_exp)
+    print(f'loss:{loss}')
     return loss
 
 def bwd_train_step(energy, gfn_model, buffer, buffer_ls, args, device, exploration_std=None,it=0):

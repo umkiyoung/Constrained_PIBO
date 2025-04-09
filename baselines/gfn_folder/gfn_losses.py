@@ -17,16 +17,19 @@ def fwd_tb(prior, initial_state, gfn, log_reward_fn, exploration_std=None, retur
     #     return loss.mean()
     states, log_pfs, log_pbs, z = gfn.get_trajectory_fwd(initial_state, exploration_std, log_reward_fn)
     x = states[:,-1]
+
     # tb loss
     with torch.no_grad():
         log_r = reward_call(x, log_reward_fn, prior, beta=1).detach()
-
+    
     loss = 0.5 * ((log_pfs.sum(-1) + z - log_pbs.sum(-1) - log_r) ** 2)
+
     return loss.mean()
 
 def reward_call(z, log_reward_fn, prior, beta):
-        reward = torch.distribution.Normal(loc=0, scale=1).log_prob(z)
-        reward += torch.exp(beta * log_reward_fn(prior(z)))
+        reward = torch.distributions.Normal(loc=0, scale=1).log_prob(z).sum(dim=1)
+   
+        reward += torch.exp(beta * log_reward_fn( prior.sample_with_noise(z) ) )
         return reward
 
 def bwd_tb(initial_state, gfn, log_reward_fn, exploration_std=None):

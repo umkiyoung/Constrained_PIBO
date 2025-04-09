@@ -32,6 +32,16 @@ class FlowModel(nn.Module):
             if track_gradient == False:
                 x = x.detach()
         return x
+    # add
+    def sample_with_noise(self, z, step_size = 10, track_gradient: bool = False ):
+        time_steps = torch.linspace(0, 1.0, step_size + 1, device=self.device, dtype=self.dtype)
+        
+        for i in range(step_size):
+            nest_z = self.step(z, time_steps[i], time_steps[i + 1])
+            if track_gradient == False:
+                z = nest_z.detach()
+        x = z
+        return x
 
     def compute_loss(self, x_1: Tensor) -> Tensor:
         # Compute the loss for the flow model

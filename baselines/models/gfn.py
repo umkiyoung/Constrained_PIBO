@@ -157,20 +157,20 @@ class JointPolicy(nn.Module):
         return self.model(torch.cat([s, t], dim=-1))
 
 
-class FlowModel(nn.Module):
-    def __init__(self, s_emb_dim: int, t_dim: int, hidden_dim: int = 64, out_dim: int = 1):
-        super(FlowModel, self).__init__()
+# class FlowModel(nn.Module):
+#     def __init__(self, s_emb_dim: int, t_dim: int, hidden_dim: int = 64, out_dim: int = 1):
+#         super(FlowModel, self).__init__()
 
-        self.model = nn.Sequential(
-            nn.Linear(s_emb_dim + t_dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, out_dim)
-        )
+#         self.model = nn.Sequential(
+#             nn.Linear(s_emb_dim + t_dim, hidden_dim),
+#             nn.GELU(),
+#             nn.Linear(hidden_dim, hidden_dim),
+#             nn.GELU(),
+#             nn.Linear(hidden_dim, out_dim)
+#         )
 
-    def forward(self, s, t):
-        return self.model(torch.cat([s, t], dim=-1))
+#     def forward(self, s, t):
+#         return self.model(torch.cat([s, t], dim=-1))
 
 
 class LangevinScalingModel(nn.Module):
@@ -441,7 +441,8 @@ class GFN(nn.Module):
         states = torch.zeros((bsz, self.trajectory_length + 1, self.dim), device=self.device)
 
         for i in range(self.trajectory_length):
-            pfs, flow = self.predict_next_state(s, i * self.dt, log_r)
+            # pfs, flow = self.predict_next_state(s, i * self.dt, log_r)
+            pfs = self.predict_next_state(s, i * self.dt, log_r)
             pf_mean, pflogvars = self.split_params(pfs)
 
             # logf[:, i] = flow
