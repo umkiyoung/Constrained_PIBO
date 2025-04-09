@@ -1,0 +1,203 @@
+import os
+import time
+import argparse
+import random
+import numpy as np
+from tqdm import tqdm
+import torch
+from torch.utils.data import DataLoader, WeightedRandomSampler
+
+from baselines.models.diffusion import QFlow, DiffusionModel
+from baselines.functions.test_function import TestFunction
+from baselines.models.value_functions import ProxyEnsemble, Proxy 
+from baselines.utils import set_seed, get_value_based_weights, get_rank_based_weights
+import wandb
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--task", type=str, default="Ackley")
+    parser.add_argument("--dim", type=int, default=200)
+    parser.add_argument("--train_batch_size", type=int, default=256)
+    parser.add_argument("--batch_size", type=int, default=100)
+    parser.add_argument("--n_init", type=int, default=200)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--max_evals", type=int, default=10000)
+    parser.add_argument("--num_proxy_epochs", type=int, default=100)
+    parser.add_argument("--num_prior_epochs", type=int, default=100)
+    parser.add_argument("--num_posterior_epochs", type=int, default=100)
+    parser.add_argument("--buffer_size", type=int, default=1000)
+    parser.add_argument("--alpha", type=float, default=0.001)
+    parser.add_argument("--beta", type=float, default=1.0)
+    parser.add_argument("--local_search", type=str, default="True") # True, False   
+    parser.add_argument("--local_search_epochs", type=int, default=10)
+    parser.add_argument("--diffusion_steps", type=int, default=30)
+    parser.add_argument("--proxy_hidden_dim", type=int, default=256)
+    parser.add_argument("--gamma", type=float, default=1.0)
+    parser.add_argument("--lamb", type=float, default=1.0)
+    parser.add_argument("--num_ensembles", type=int, default=5)
+    parser.add_argument("--reweighting", type=str, default="exp") # exp, uniform, value, rank
+    parser.add_argument("--filtering", type=str, default='True') # True, False
+    parser.add_argument("--num_proposals", type=int, default=10)
+    parser.add_argument("--training_posterior", type=str, default='both') # both, on, off
+    parser.add_argument("--ablation", type=str, default="")
+    parser.add_argument("--reward_sampler", type=str, default="False")
+    parser.add_argument("--constraint_formulation", type=str, default="Lagrangian") # Soft, LogBarrier, Lagrangian
+    args = parser.parse_args()
+
+    
+    import os
+    if not os.path.exists("./baselines/results"):
+        os.makedirs("./baselines/results")
+    if not os.path.exists("./baselines/results/outsource"):
+        os.makedirs("./baselines/results/outsource")
+    wandb.init(project="outsource",
+               config=vars(args))
+    
+    task = args.task
+    dim = args.dim
+    train_batch_size = args.train_batch_size
+    batch_size = args.batch_size
+    n_init = args.n_init
+    seed = args.seed
+    dtype = torch.double
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    set_seed(seed)
+
+    test_function = TestFunction(task = task, dim = dim, n_init = n_init, seed = seed, dtype=dtype, device=device)
+    test_function.get_initial_points()
+    test_function.true_score = torch.tensor([test_function.eval_score(x) for x in test_function.X], dtype=dtype, device=device).unsqueeze(-1)
+    
+       
+    num_rounds = (args.max_evals - n_init) // batch_size
+    #num_epochs = args.num_epochs
+    num_proxy_epochs = args.num_proxy_epochs
+    num_prior_epochs = args.num_prior_epochs
+    num_posterior_epochs = args.num_posterior_epochs
+    
+    X_total = test_function.X.cpu().numpy()
+    Y_total = test_function.Y.cpu().numpy()
+    C_total = test_function.C.cpu().numpy()
+
+    print(test_function.Y.shape)
+    print(test_function.C.shape)
+    
+    dim_c = test_function.C.shape[1]
+    
+    for round in range(num_rounds):
+        start_time = time.time()
+        test_function.X_mean = test_function.X.mean(dim=0)
+        test_function.X_std = test_function.X.std(dim=0)
+        
+        test_function.Y_mean = test_function.Y.mean()
+        test_function.Y_std = test_function.Y.std()
+        
+        test_function.C_mean = test_function.C.mean(dim=0)
+        test_function.C_std = test_function.C.std(dim=0)
+        
+        # Re-weighting for the training set (it seems cruical for the performance)
+        # Prior implementation is for offline setting, so we should consider low-scoring regions to prevent deviation from the offline dataset
+        # However, it is not necessary for online setting
+        weights = torch.exp((test_function.Y.squeeze() - test_function.Y.mean()) / (test_function.Y.std() + 1e-7))
+            
+        sampler = WeightedRandomSampler(weights, len(weights), replacement=True)
+        data_loader = DataLoader(test_function, batch_size=train_batch_size, sampler=sampler)
+        
+        proxy_model_ens = ProxyEnsemble(x_dim=dim, hidden_dim=args.proxy_hidden_dim, output_dim=1 + dim_c, 
+                                        num_hidden_layers=3, n_ensembles=args.num_ensembles, ucb_reward=True, constraint_formulation="Lagrangian",
+                                        lamb=args.lamb).to(dtype=dtype, device=device)
+        proxy_model_ens.gamma = args.gamma
+
+        # Proxy training part
+        for proxy_model in proxy_model_ens.models:
+            proxy_model_optimizer = torch.optim.Adam(proxy_model.parameters(), lr=1e-3)
+            
+            for epoch in tqdm(range(num_proxy_epochs), dynamic_ncols=True):
+                total_loss = 0.0
+                for x, y, c in data_loader:
+                    x = (x - test_function.X_mean) / (test_function.X_std + 1e-7)
+                    x += torch.randn_like(x) * 0.001
+                    y = (y - test_function.Y_mean) / (test_function.Y_std + 1e-7)
+                    c = test_function.normalizing_constraints(c, test_function.C_mean, test_function.C_std)
+                    # c = (c - test_function.C_mean) / (test_function.C_std + 1e-7)
+                    proxy_model_optimizer.zero_grad()
+                    loss = proxy_model.compute_loss(x, y, c)
+                    loss.backward()
+                    proxy_model_optimizer.step()
+                    total_loss += loss.item()
+
+        print(f"Round: {round+1}\tProxy model trained")
+        
+        
+        # Flow model Training Part
+        prior_model = Flowmodel(x_dim=dim, hidden_dim=256, num_hidden_layers=3, diffusion_steps=args.diffusion_steps).to(dtype=dtype, device=device)
+        ### Training Part ###
+        
+        
+        
+        # Diffusion Sampler Training Part
+        # Diffusion sampler code 아무거나 상관없음
+        # PIS DDS DIS Improved off-policy for diffuion sampler
+        
+        # Reward: Diffusion sampler z ~ sampler, x ~ flow (z), y = proxy(x)  Reward Modeling 
+        
+        # Diffsuion sampler Training
+        
+        # --------------------
+        # Diffusion sampler -> sampling
+        # 얘를 Flow -> 집어넣고
+        # 거기서 나온 X -> 가져와서 Y test_function에서 구하고 
+        # Score 구하고 데이터 셋 에넣고 저장하고
+        
+        X_sample_unnorm = X_sample * test_function.X_std + test_function.X_mean
+        X_sample_unnorm = torch.clamp(X_sample_unnorm, 0.0, 1.0)
+        Y_sample_unnorm = torch.tensor([test_function.eval_objective(x) for x in X_sample_unnorm], dtype=dtype, device=device).unsqueeze(-1)        
+        C_sample_unnorm = torch.cat([test_function.eval_constraints(x) for x in X_sample_unnorm], dim=0).to(dtype).to(device)
+        # print(f"Round: {round+1}\tSeed: {seed}\tMax in this round: {Y_sample_unnorm.max().item():.3f}")
+        true_score = torch.tensor([test_function.eval_score(x) for x in X_sample_unnorm], dtype=dtype, device=device).unsqueeze(-1)
+        print(f"Round: {round+1}\tSeed: {seed}\tMax in this round: {Y_sample_unnorm.max().item():.3f}\tMin Constraint: {C_sample_unnorm.min().item():.3f}\t Log_rewards: {proxy_model_ens.log_reward(X_sample_unnorm).max().item():.3f}\t True score: {true_score.max().item():.3f}")
+        
+        test_function.X = torch.cat([test_function.X, X_sample_unnorm], dim=0)
+        test_function.Y = torch.cat([test_function.Y, Y_sample_unnorm], dim=0)
+        test_function.C = torch.cat([test_function.C, C_sample_unnorm], dim=0)
+        
+        test_function.true_score = torch.cat([test_function.true_score, true_score], dim=0)
+        print(f"Round: {round+1}\tSeed: {seed}\tMax so far: {test_function.Y.max().item():.3f}\tMin Constraint: {test_function.C.min().item():.3f}\t Log_rewards: {proxy_model_ens.log_reward(test_function.X).max().item():.3f}\t True score: {test_function.true_score.max().item():.3f}")
+        # print(f"Round: {round+1}\tMax so far: {test_function.Y.max().item():.3f}")
+        
+        print(f"Time taken: {time.time() - start_time:.3f} seconds")
+        print()
+        
+        # Remove low-score samples in the training set (it seems cruical for the performance)
+        idx = torch.argsort(test_function.Y.squeeze(), descending=True)[:args.buffer_size]
+        test_function.X = test_function.X[idx]
+        test_function.Y = test_function.Y[idx]
+        print(len(test_function.X))
+        X_total = np.concatenate([X_total, X_sample_unnorm.cpu().numpy()], axis=0)
+        Y_total = np.concatenate([Y_total, Y_sample_unnorm.cpu().numpy()], axis=0)
+        
+        wandb.log({
+            "Round": round + 1,
+            "Max so far": test_function.Y.max().item(),
+            "Max in this round": Y_sample_unnorm.max().item(),
+            "Min Constraint so far": test_function.C.min().item(),
+            "Min Constraint in this round": C_sample_unnorm.min().item(),
+            "Max Log rewards": proxy_model_ens.log_reward(test_function.X).max().item(),
+            "Max True score": test_function.true_score.max().item(),
+            "Time taken": time.time() - start_time,
+            "Seed": seed,
+        })
+        
+        
+        # if len(Y_total) >= 1000:
+        save_len = min(len(Y_total) // 1000 * 1000, args.max_evals)
+        save_np = Y_total[:save_len]
+    
+        # if args.ablation == "":
+        if not os.path.exists(f"./baselines/results/pibo"):
+            os.makedirs(f"./baselines/results/pibo", exist_ok=True)
+        np.save(
+            f"./baselines/results/pibo/pibo_{task}_{dim}_{seed}_{n_init}_{args.batch_size}_{args.buffer_size}_{args.local_search_epochs}_{args.num_ensembles}_{args.max_evals}_{save_len}.npy",
+            np.array(save_np),
+        )
+
