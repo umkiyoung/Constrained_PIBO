@@ -22,9 +22,12 @@ class DiffusionSampler():
         return loss
     
   
-    def sample(self, batch_size, fuck):
+    def sample(self, batch_size, fuck, step_size, track_gradient):
         # Sample from the gfn_sampler
-        return self.sampler.sample(batch_size, fuck)
+        z = self.sampler.sample(batch_size, fuck)
+        x = self.prior.sample_with_noise(z, step_size, track_gradient)
+        return x
+        
         
     
     # def forward_tb(self):

@@ -256,7 +256,7 @@ if __name__ == "__main__":
         def fuck(x):
             return x
     
-        X_sample = diffusion_sampler.sample(batch_size, fuck)         
+        X_sample = diffusion_sampler.sample(batch_size, fuck, step_size = args.flow_steps, track_gradient=False)         
         # Reward: Diffusion sampler z ~ sampler, x ~ flow (z), y = proxy(x)  Reward Modeling         
         # Diffsuion sampler Training
         # --------------------
