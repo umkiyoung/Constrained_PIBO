@@ -22,7 +22,7 @@ from botorch.models.transforms.outcome import Standardize
 import argparse
 
 from baselines.functions.test_function import TestFunction
-from baselines.utils import set_seed
+from baselines.utils import set_seed, save_numpy_array
 import numpy as np
 
 
@@ -34,11 +34,8 @@ if __name__ == "__main__":
     parser.add_argument('--n_init', default=200, type=int, help=' number of initial points')
     parser.add_argument('--batch_size', default=100, type=int, help='batch size of each iteration')
     parser.add_argument('--seed', default=0, type=int, help='random seed')
+    parser.add_argument('--save_path', default='./baselines/results/scbo/', type=str, help='path to save the results')
     args = parser.parse_args()    
-    if not os.path.exists("./baselines/results"):
-        os.makedirs("./baselines/results")
-    if not os.path.exists("./baselines/results/scbo/"):
-        os.makedirs("./baselines/results/scbo/")
     warnings.filterwarnings("ignore")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -304,6 +301,9 @@ while not state.restart_triggered and len(train_X) < max_evals:  # Run until TuR
         )
         
     # Save the results
-    if len(total_X) % 100 == 0:
-        np_scores = scores.cpu().numpy()
-        np.save(f"./baselines/results/scbo/{task}_{dim}_{seed}_{n_init}_{batch_size}_{max_evals}_{len(scores)}.npy", np_scores)
+    save_len = min(len(scores) // 1000 * 1000, args.max_evals)
+    save_np = scores[:save_len].cpu().numpy()
+    file_name = f"scbo_{task}_{dim}_{seed}_{n_init}_{batch_size}_{max_evals}_{len(scores)}.npy"
+    save_numpy_array(path=args.save_path, array=save_np, file_name=file_name)
+    
+    

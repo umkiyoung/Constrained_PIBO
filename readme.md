@@ -1,4 +1,4 @@
-# Posterior Inference with Outsoursed Diffusion Models for High-Dimensional Constrained Black-box Optimization (PIOD-CBO)
+# Posterior Inference with Outsoursed Diffusion Models for High-Dimensional Constrained Black-box Optimization (Constrained-PIBO)
 
 ## Installation Guide
 
