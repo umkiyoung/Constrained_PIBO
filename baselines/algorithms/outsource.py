@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 from baselines.models.flow import FlowModel
 from baselines.functions.test_function import TestFunction
 from baselines.models.value_functions import ProxyEnsemble, Proxy 
-from baselines.utils import set_seed, save_numpy_array
+from baselines.utils import save_numpy_array, set_seed, get_value_based_weights, get_rank_based_weights
 import wandb
 
 if __name__ == "__main__":
@@ -33,8 +33,7 @@ if __name__ == "__main__":
     parser.add_argument("--lamb", type=float, default=1.0)
     parser.add_argument("--num_ensembles", type=int, default=5)
     parser.add_argument("--training_posterior", type=str, default='both') # both, on, off
-    parser.add_argument("--constraint_formulation", type=str, default="None") # Soft, LogBarrier, Lagrangian, None for non-constraint
-    parser.add_argument("--save_path", type=str, default="./baselines/results/outsource/")
+    parser.add_argument("--constraint_formulation", type=str, default="Lagrangian") # Soft, LogBarrier, Lagrangian
     args = parser.parse_args()
 
     # wandb.init(project="outsource",
@@ -47,7 +46,7 @@ if __name__ == "__main__":
     n_init = args.n_init
     seed = args.seed
     dtype = torch.double
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:6" if torch.cuda.is_available() else "cpu")
     
     set_seed(seed)
 
@@ -134,24 +133,55 @@ if __name__ == "__main__":
         print(f"Round: {round+1}\tPrior model trained")
         
 
-        X_sample = prior_model.sample(batch_size, step_size=args.flow_steps, track_gradient=False)
-
         
         
         # Diffusion Sampler Training Part
-        # Diffusion sampler code 아무거나 상관없음
-        # PIS DDS DIS Improved off-policy for diffuion sampler
+        # gfn_model = GFN(dim, args.s_emb_dim, args.hidden_dim, args.harmonics_dim, args.t_emb_dim,
+        #                 trajectory_length=args.T, clipping=args.clipping, lgv_clip=args.lgv_clip, gfn_clip=args.gfn_clip,
+        #                 langevin=args.langevin, learned_variance=args.learned_variance,
+        #                 partial_energy=args.partial_energy, log_var_range=args.log_var_range,
+        #                 pb_scale_range=args.pb_scale_range,
+        #                 t_scale=args.t_scale, langevin_scaling_per_dimension=args.langevin_scaling_per_dimension,
+        #                 conditional_flow_model=args.conditional_flow_model, learn_pb=args.learn_pb,
+        #                 pis_architectures=args.pis_architectures, lgv_layers=args.lgv_layers,
+        #                 joint_layers=args.joint_layers, zero_init=args.zero_init, device=device).to(device)
+
+
+        # gfn_optimizer = get_gfn_optimizer(gfn_model, args.lr_policy, args.lr_flow, args.lr_back, args.learn_pb,
+        #                                 args.conditional_flow_model, args.use_weight_decay, args.weight_decay)
+        # metrics = dict()
+
+        # buffer = ReplayBuffer(args.buffer_size, device, proxy_model_ens, args.batch_size, data_ndim=dim, beta=args.beta,
+        #                     rank_weight=args.rank_weight, prioritized=args.prioritized)
+        # buffer_ls = ReplayBuffer(args.buffer_size, device, proxy_model_ens, args.batch_size, data_ndim=dim, beta=args.beta,
+        #                     rank_weight=args.rank_weight, prioritized=args.prioritized)
+        # gfn_model.train()
         
-        # Reward: Diffusion sampler z ~ sampler, x ~ flow (z), y = proxy(x)  Reward Modeling 
         
+        # diffusion_sampler = DiffusionSampler(prior_model,proxy_model_ens, gfn_model, gfn_optimizer, args, buffer, buffer_ls, device, args.batch_size, beta=1)
+        # for i in trange(num_posterior_epochs+1):
+        #     print('posterior')
+        #     loss = diffusion_sampler.forward_tb(i)
+        #     loss.backward()
+        #     gfn_optimizer.step()
+         
+        # Reward: Diffusion sampler z ~ sampler, x ~ flow (z), y = proxy(x)  Reward Modeling         
         # Diffsuion sampler Training
-        
         # --------------------
         # Diffusion sampler -> sampling
+        
         # 얘를 Flow -> 집어넣고
         # 거기서 나온 X -> 가져와서 Y test_function에서 구하고 
+
         # Score 구하고 데이터 셋 에넣고 저장하고
-        
+        print(f"Round: {round+1}\tPosterior model trained")
+
+
+
+
+
+
+        X_sample = prior_model.sample(batch_size, step_size=args.flow_steps, track_gradient=False)
         X_sample_unnorm = X_sample * test_function.X_std + test_function.X_mean
         X_sample_unnorm = torch.clamp(X_sample_unnorm, 0.0, 1.0)
         Y_sample_unnorm = torch.tensor([test_function.eval_objective(x) for x in X_sample_unnorm], dtype=dtype, device=device).unsqueeze(-1)        
