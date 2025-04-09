@@ -45,6 +45,9 @@ pip install "sparse-ho @ https://github.com/QB3/sparse-ho/archive/master.zip"
 pip install libsvmdata
 pip install pygame
 
+pip install einops
+pip install POT
+
 # If halfcheetah doesn't work:
 pip install --upgrade gym
 ```

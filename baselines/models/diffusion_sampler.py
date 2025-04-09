@@ -20,6 +20,13 @@ class DiffusionSampler():
         loss = train_step(self.proxy, self.sampler, self.optimizer , i, self.args.exploratory,
                                                 self.buffer, self.buffer_ls, self.args.exploration_factor, self.args.exploration_wd, self.prior,self.args , self.device)
         return loss
+    
+  
+    def sample(self, batch_size, fuck):
+        # Sample from the gfn_sampler
+        return self.sampler.sample(batch_size, fuck)
+        
+    
     # def forward_tb(self):
     #     states, log_pfs, log_pbs, log_fs = self.sampler.sample(self.bsz, self.proxy)
     #     x = states[:,-1]
