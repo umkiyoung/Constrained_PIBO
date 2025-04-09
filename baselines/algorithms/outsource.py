@@ -7,7 +7,7 @@ from tqdm import tqdm
 import torch
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
-from baselines.models.diffusion import QFlow, DiffusionModel
+from baselines.models.flow import FlowModel
 from baselines.functions.test_function import TestFunction
 from baselines.models.value_functions import ProxyEnsemble, Proxy 
 from baselines.utils import set_seed, get_value_based_weights, get_rank_based_weights
@@ -26,21 +26,13 @@ if __name__ == "__main__":
     parser.add_argument("--num_prior_epochs", type=int, default=100)
     parser.add_argument("--num_posterior_epochs", type=int, default=100)
     parser.add_argument("--buffer_size", type=int, default=1000)
-    parser.add_argument("--alpha", type=float, default=0.001)
     parser.add_argument("--beta", type=float, default=1.0)
-    parser.add_argument("--local_search", type=str, default="True") # True, False   
-    parser.add_argument("--local_search_epochs", type=int, default=10)
-    parser.add_argument("--diffusion_steps", type=int, default=30)
+    parser.add_argument("--flow_steps", type=int, default=30)
     parser.add_argument("--proxy_hidden_dim", type=int, default=256)
     parser.add_argument("--gamma", type=float, default=1.0)
     parser.add_argument("--lamb", type=float, default=1.0)
     parser.add_argument("--num_ensembles", type=int, default=5)
-    parser.add_argument("--reweighting", type=str, default="exp") # exp, uniform, value, rank
-    parser.add_argument("--filtering", type=str, default='True') # True, False
-    parser.add_argument("--num_proposals", type=int, default=10)
     parser.add_argument("--training_posterior", type=str, default='both') # both, on, off
-    parser.add_argument("--ablation", type=str, default="")
-    parser.add_argument("--reward_sampler", type=str, default="False")
     parser.add_argument("--constraint_formulation", type=str, default="Lagrangian") # Soft, LogBarrier, Lagrangian
     args = parser.parse_args()
 
@@ -50,8 +42,8 @@ if __name__ == "__main__":
         os.makedirs("./baselines/results")
     if not os.path.exists("./baselines/results/outsource"):
         os.makedirs("./baselines/results/outsource")
-    wandb.init(project="outsource",
-               config=vars(args))
+    # wandb.init(project="outsource",
+    #            config=vars(args))
     
     task = args.task
     dim = args.dim
@@ -130,9 +122,25 @@ if __name__ == "__main__":
         
         
         # Flow model Training Part
-        prior_model = Flowmodel(x_dim=dim, hidden_dim=256, num_hidden_layers=3, diffusion_steps=args.diffusion_steps).to(dtype=dtype, device=device)
-        ### Training Part ###
+        prior_model = FlowModel(x_dim=dim, hidden_dim=512, device=device, dtype=dtype).to(dtype=dtype, device=device)
+        prior_model_optimizer = torch.optim.Adam(prior_model.parameters(), lr=1e-3)
+        prior_model.train()
+        for epoch in tqdm(range(num_prior_epochs), dynamic_ncols=True):
+            total_loss = 0.0
+            for x, y, c in data_loader:
+                x = (x - test_function.X_mean) / (test_function.X_std + 1e-7)
+                x += torch.randn_like(x) * 0.001
+                prior_model_optimizer.zero_grad()
+                loss = prior_model.compute_loss(x)
+                loss.backward()
+                prior_model_optimizer.step()
+                total_loss += loss.item()
+            # print(f"Round: {round+1}\tEpoch: {epoch+1}\tLoss: {total_loss:.3f}")
+        print(f"Round: {round+1}\tPrior model trained")
         
+
+        X_sample = prior_model.sample(batch_size, step_size=args.flow_steps, track_gradient=False)
+
         
         
         # Diffusion Sampler Training Part
@@ -176,28 +184,19 @@ if __name__ == "__main__":
         X_total = np.concatenate([X_total, X_sample_unnorm.cpu().numpy()], axis=0)
         Y_total = np.concatenate([Y_total, Y_sample_unnorm.cpu().numpy()], axis=0)
         
-        wandb.log({
-            "Round": round + 1,
-            "Max so far": test_function.Y.max().item(),
-            "Max in this round": Y_sample_unnorm.max().item(),
-            "Min Constraint so far": test_function.C.min().item(),
-            "Min Constraint in this round": C_sample_unnorm.min().item(),
-            "Max Log rewards": proxy_model_ens.log_reward(test_function.X).max().item(),
-            "Max True score": test_function.true_score.max().item(),
-            "Time taken": time.time() - start_time,
-            "Seed": seed,
-        })
+        # wandb.log({
+        #     "Round": round + 1,
+        #     "Max so far": test_function.Y.max().item(),
+        #     "Max in this round": Y_sample_unnorm.max().item(),
+        #     "Min Constraint so far": test_function.C.min().item(),
+        #     "Min Constraint in this round": C_sample_unnorm.min().item(),
+        #     "Max Log rewards": proxy_model_ens.log_reward(test_function.X).max().item(),
+        #     "Max True score": test_function.true_score.max().item(),
+        #     "Time taken": time.time() - start_time,
+        #     "Seed": seed,
+        # })
         
         
         # if len(Y_total) >= 1000:
         save_len = min(len(Y_total) // 1000 * 1000, args.max_evals)
         save_np = Y_total[:save_len]
-    
-        # if args.ablation == "":
-        if not os.path.exists(f"./baselines/results/pibo"):
-            os.makedirs(f"./baselines/results/pibo", exist_ok=True)
-        np.save(
-            f"./baselines/results/pibo/pibo_{task}_{dim}_{seed}_{n_init}_{args.batch_size}_{args.buffer_size}_{args.local_search_epochs}_{args.num_ensembles}_{args.max_evals}_{save_len}.npy",
-            np.array(save_np),
-        )
-

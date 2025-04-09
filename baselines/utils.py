@@ -1,6 +1,8 @@
 import random
 import numpy as np
 import torch
+from torch.utils.data import Dataset
+import matplotlib.pyplot as plt
 
 def set_seed(seed, torch_deterministic=True):
     random.seed(seed)
@@ -135,3 +137,33 @@ def latin_hypercube(n_pts, dim):
     pert = np.random.uniform(-1.0, 1.0, (n_pts, dim)) / float(2 * n_pts)
     X += pert
     return X
+
+def sample_visual(flow, sample_size, dim, step_size):
+    """
+    File from the flow matching tutorial codes.
+    Visualizes the evolution of samples through a flow model over time steps.
+    Parameters:
+        flow (object): A flow model object that implements a `step` method to transform samples.
+        sample_size (int): The number of samples to generate and visualize.
+        dim (int): The dimensionality of the samples.
+        step_size (int): The number of time steps for the flow transformation.
+    Returns:
+        None: Displays a matplotlib figure showing the progression of samples at each time step.
+    """
+
+    x = torch.randn(sample_size, dim)
+    fig, axes = plt.subplots(1, step_size + 1, figsize=(30, 4), sharex=True, sharey=True)
+    time_steps = torch.linspace(0, 1.0, step_size + 1)
+
+    axes[0].scatter(x.detach()[:, 0], x.detach()[:, 1], s=10)
+    axes[0].set_title(f't = {time_steps[0]:.2f}')
+    axes[0].set_xlim(-3.0, 3.0)
+    axes[0].set_ylim(-3.0, 3.0)
+
+    for i in range(step_size):
+        x = flow.step(x, time_steps[i], time_steps[i + 1])
+        axes[i + 1].scatter(x.detach()[:, 0], x.detach()[:, 1], s=10)
+        axes[i + 1].set_title(f't = {time_steps[i + 1]:.2f}')
+
+    plt.tight_layout()
+    plt.show()
