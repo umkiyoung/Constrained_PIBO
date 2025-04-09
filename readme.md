@@ -49,7 +49,7 @@ pip install pygame
 pip install --upgrade gym
 ```
 
-Run examples:
+# Run examples:
 
 ```bash
 sh baselines/scripts/pibo.sh

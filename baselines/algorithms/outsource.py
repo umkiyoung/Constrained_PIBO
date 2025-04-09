@@ -34,6 +34,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_ensembles", type=int, default=5)
     parser.add_argument("--training_posterior", type=str, default='both') # both, on, off
     parser.add_argument("--constraint_formulation", type=str, default="Lagrangian") # Soft, LogBarrier, Lagrangian
+    parser.add_argument("--save_path", type=str, default="./baselines/algorithms/outsource/")
     args = parser.parse_args()
 
     # wandb.init(project="outsource",
@@ -46,7 +47,7 @@ if __name__ == "__main__":
     n_init = args.n_init
     seed = args.seed
     dtype = torch.double
-    device = torch.device("cuda:6" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     set_seed(seed)
 
