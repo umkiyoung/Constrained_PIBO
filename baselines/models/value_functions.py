@@ -90,8 +90,7 @@ class ProxyEnsemble(nn.Module):
                 pred_y = pred_y + pred_c
             
             else:
-                raise ValueError(f"Unknown constraint formulation: {self.constraint_formulation}")
-        
+                pred_y = pred_y
         else:
             pred_y = self(x).squeeze()
         

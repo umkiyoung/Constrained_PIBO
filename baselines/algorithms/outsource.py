@@ -200,3 +200,11 @@ if __name__ == "__main__":
         # if len(Y_total) >= 1000:
         save_len = min(len(Y_total) // 1000 * 1000, args.max_evals)
         save_np = Y_total[:save_len]
+
+        # if args.ablation == "":
+        if not os.path.exists(f"./baselines/results/outsource"):
+            os.makedirs(f"./baselines/results/outsource", exist_ok=True)
+        np.save(
+            f"./baselines/results/outsource/outsource_{task}_{dim}_{seed}_{n_init}_{args.batch_size}_{args.buffer_size}_{args.local_search_epochs}_{args.num_ensembles}_{args.max_evals}_{save_len}.npy",
+            np.array(save_np),
+        )
