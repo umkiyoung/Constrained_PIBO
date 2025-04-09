@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 from baselines.models.diffusion import QFlow, DiffusionModel
 from baselines.functions.test_function import TestFunction
 from baselines.models.value_functions import ProxyEnsemble, Proxy 
-from baselines.utils import set_seed, get_value_based_weights, get_rank_based_weights
+from baselines.utils import set_seed, save_numpy_array
 import wandb
 
 if __name__ == "__main__":
@@ -41,17 +41,12 @@ if __name__ == "__main__":
     parser.add_argument("--training_posterior", type=str, default='both') # both, on, off
     parser.add_argument("--ablation", type=str, default="")
     parser.add_argument("--reward_sampler", type=str, default="False")
-    parser.add_argument("--constraint_formulation", type=str, default="Lagrangian") # Soft, LogBarrier, Lagrangian
+    parser.add_argument("--constraint_formulation", type=str, default="Lagrangian") # Soft, LogBarrier, Lagrangian, None for the non-constrained
+    parser.add_argument("--save_path", type=str, default="./baselines/algorithms/pibo/")
     args = parser.parse_args()
 
-    
-    import os
-    if not os.path.exists("./baselines/results"):
-        os.makedirs("./baselines/results")
-    if not os.path.exists("./baselines/results/pibo"):
-        os.makedirs("./baselines/results/pibo")
-    wandb.init(project="pibo",
-               config=vars(args))
+    # wandb.init(project="pibo",
+    #            config=vars(args))
     
     task = args.task
     dim = args.dim
@@ -78,7 +73,8 @@ if __name__ == "__main__":
     X_total = test_function.X.cpu().numpy()
     Y_total = test_function.Y.cpu().numpy()
     C_total = test_function.C.cpu().numpy()
-
+    true_score_total = test_function.true_score.cpu().numpy()
+    
     print(test_function.Y.shape)
     print(test_function.C.shape)
     
@@ -104,7 +100,7 @@ if __name__ == "__main__":
         data_loader = DataLoader(test_function, batch_size=train_batch_size, sampler=sampler)
         
         proxy_model_ens = ProxyEnsemble(x_dim=dim, hidden_dim=args.proxy_hidden_dim, output_dim=1 + dim_c, 
-                                        num_hidden_layers=3, n_ensembles=args.num_ensembles, ucb_reward=True, constraint_formulation="Lagrangian",
+                                        num_hidden_layers=3, n_ensembles=args.num_ensembles, ucb_reward=True, constraint_formulation=args.constraint_formulation,
                                         lamb=args.lamb).to(dtype=dtype, device=device)
         proxy_model_ens.gamma = args.gamma
 
@@ -265,29 +261,25 @@ if __name__ == "__main__":
         print(len(test_function.X))
         X_total = np.concatenate([X_total, X_sample_unnorm.cpu().numpy()], axis=0)
         Y_total = np.concatenate([Y_total, Y_sample_unnorm.cpu().numpy()], axis=0)
+        true_score_total = np.concatenate([true_score_total, true_score.cpu().numpy()], axis=0)
         
-        wandb.log({
-            "Round": round + 1,
-            "Max so far": test_function.Y.max().item(),
-            "Max in this round": Y_sample_unnorm.max().item(),
-            "Min Constraint so far": test_function.C.min().item(),
-            "Min Constraint in this round": C_sample_unnorm.min().item(),
-            "Max Log rewards": proxy_model_ens.log_reward(test_function.X).max().item(),
-            "Max True score": test_function.true_score.max().item(),
-            "Time taken": time.time() - start_time,
-            "Seed": seed,
-        })
+        # wandb.log({
+        #     "Round": round + 1,
+        #     "Max so far": test_function.Y.max().item(),
+        #     "Max in this round": Y_sample_unnorm.max().item(),
+        #     "Min Constraint so far": test_function.C.min().item(),
+        #     "Min Constraint in this round": C_sample_unnorm.min().item(),
+        #     "Max Log rewards": proxy_model_ens.log_reward(test_function.X).max().item(),
+        #     "Max True score": test_function.true_score.max().item(),
+        #     "Time taken": time.time() - start_time,
+        #     "Seed": seed,
+        # })
         
         
         # if len(Y_total) >= 1000:
-        save_len = min(len(Y_total) // 1000 * 1000, args.max_evals)
-        save_np = Y_total[:save_len]
-    
-        # if args.ablation == "":
-        if not os.path.exists(f"./baselines/results/pibo"):
-            os.makedirs(f"./baselines/results/pibo", exist_ok=True)
-        np.save(
-            f"./baselines/results/pibo/pibo_{task}_{dim}_{seed}_{n_init}_{args.batch_size}_{args.buffer_size}_{args.local_search_epochs}_{args.num_ensembles}_{args.max_evals}_{save_len}.npy",
-            np.array(save_np),
-        )
+        save_len = min(len(true_score_total) // 1000 * 1000, args.max_evals)
+        save_np = true_score_total[:save_len]
+        file_name = f"pibo_{task}_{dim}_{seed}_{n_init}_{args.batch_size}_{args.buffer_size}_{args.local_search_epochs}_{args.num_ensembles}_{args.max_evals}_{save_len}.npy"
+        save_numpy_array(path=args.save_path, array=save_np, file_name=file_name)
+
 

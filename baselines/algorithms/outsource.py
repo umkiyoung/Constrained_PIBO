@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 from baselines.models.flow import FlowModel
 from baselines.functions.test_function import TestFunction
 from baselines.models.value_functions import ProxyEnsemble, Proxy 
-from baselines.utils import set_seed, get_value_based_weights, get_rank_based_weights
+from baselines.utils import set_seed, save_numpy_array
 import wandb
 
 if __name__ == "__main__":
@@ -33,15 +33,10 @@ if __name__ == "__main__":
     parser.add_argument("--lamb", type=float, default=1.0)
     parser.add_argument("--num_ensembles", type=int, default=5)
     parser.add_argument("--training_posterior", type=str, default='both') # both, on, off
-    parser.add_argument("--constraint_formulation", type=str, default="Lagrangian") # Soft, LogBarrier, Lagrangian
+    parser.add_argument("--constraint_formulation", type=str, default="None") # Soft, LogBarrier, Lagrangian, None for non-constraint
+    parser.add_argument("--save_path", type=str, default="./baselines/results/outsource/")
     args = parser.parse_args()
 
-    
-    import os
-    if not os.path.exists("./baselines/results"):
-        os.makedirs("./baselines/results")
-    if not os.path.exists("./baselines/results/outsource"):
-        os.makedirs("./baselines/results/outsource")
     # wandb.init(project="outsource",
     #            config=vars(args))
     
@@ -96,7 +91,7 @@ if __name__ == "__main__":
         data_loader = DataLoader(test_function, batch_size=train_batch_size, sampler=sampler)
         
         proxy_model_ens = ProxyEnsemble(x_dim=dim, hidden_dim=args.proxy_hidden_dim, output_dim=1 + dim_c, 
-                                        num_hidden_layers=3, n_ensembles=args.num_ensembles, ucb_reward=True, constraint_formulation="Lagrangian",
+                                        num_hidden_layers=3, n_ensembles=args.num_ensembles, ucb_reward=True, constraint_formulation=args.constraint_formulation,
                                         lamb=args.lamb).to(dtype=dtype, device=device)
         proxy_model_ens.gamma = args.gamma
 
@@ -200,11 +195,5 @@ if __name__ == "__main__":
         # if len(Y_total) >= 1000:
         save_len = min(len(Y_total) // 1000 * 1000, args.max_evals)
         save_np = Y_total[:save_len]
-
-        # if args.ablation == "":
-        if not os.path.exists(f"./baselines/results/outsource"):
-            os.makedirs(f"./baselines/results/outsource", exist_ok=True)
-        np.save(
-            f"./baselines/results/outsource/outsource_{task}_{dim}_{seed}_{n_init}_{args.batch_size}_{args.buffer_size}_{args.local_search_epochs}_{args.num_ensembles}_{args.max_evals}_{save_len}.npy",
-            np.array(save_np),
-        )
+        file_name = f"outsource_{task}_{dim}_{seed}_{n_init}_{args.batch_size}_{args.buffer_size}_{args.num_ensembles}_{args.max_evals}_{save_len}.npy"
+        save_numpy_array(path=args.save_path, array=save_np, file_name=file_name)

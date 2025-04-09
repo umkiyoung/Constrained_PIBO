@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 import matplotlib.pyplot as plt
+import os
 
 def set_seed(seed, torch_deterministic=True):
     random.seed(seed)
@@ -167,3 +168,15 @@ def sample_visual(flow, sample_size, dim, step_size):
 
     plt.tight_layout()
     plt.show()
+    
+    
+def save_numpy_array(path, array, file_name):
+    string = path.split('/')
+    path_parent = '/'.join(string[:-1])
+    if not os.path.exists(path_parent):
+        os.makedirs(path_parent)
+    if not os.path.exists(path):
+        os.makedirs(path)
+    np.save(os.path.join(path, file_name), array)
+    print(f"Array saved to '{os.path.join(path, file_name)}'.")
+    
