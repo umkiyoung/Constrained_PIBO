@@ -98,7 +98,7 @@ if __name__ == "__main__":
     parser.add_argument('--exploratory', action='store_true', default=False)
 
     parser.add_argument('--sampling', type=str, default="buffer", choices=('sleep_phase', 'energy', 'buffer'))
-    parser.add_argument('--langevin', action='store_true', default=False)
+    parser.add_argument('--langevin', action='store_true', default=False)  
     parser.add_argument('--langevin_scaling_per_dimension', action='store_true', default=False)
     parser.add_argument('--conditional_flow_model', action='store_true', default=False)
     parser.add_argument('--learn_pb', action='store_true', default=False)
@@ -252,11 +252,9 @@ if __name__ == "__main__":
            
             loss.backward()
             gfn_optimizer.step()
-        
-        def fuck(x):
-            return x
     
-        X_sample = diffusion_sampler.sample(batch_size, fuck, step_size = args.flow_steps, track_gradient=False)         
+    
+        X_sample = diffusion_sampler.sample(batch_size, proxy_model_ens.log_reward, step_size = args.flow_steps, track_gradient=False)         
         # Reward: Diffusion sampler z ~ sampler, x ~ flow (z), y = proxy(x)  Reward Modeling         
         # Diffsuion sampler Training
         # --------------------
