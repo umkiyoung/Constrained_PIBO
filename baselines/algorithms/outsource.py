@@ -124,8 +124,8 @@ if __name__ == "__main__":
 
 
     ################
-    # wandb.init(project="outsource",
-    #            config=vars(args))
+    wandb.init(project="outsource",
+               config=vars(args))
     
     task = args.task
     dim = args.dim
@@ -245,8 +245,8 @@ if __name__ == "__main__":
                             rank_weight=args.rank_weight, prioritized=args.prioritized)
         buffer_ls = ReplayBuffer(args.buffer_size, device, proxy_model_ens, args.batch_size, data_ndim=dim, beta=args.beta,
                             rank_weight=args.rank_weight, prioritized=args.prioritized)
-        buffer = load_buffer(args.dim, 10000, buffer, prior_model, args.flow_steps, energy)
-        buffer_ls = load_buffer(args.dim, 10000, buffer_ls, prior_model, args.flow_steps, energy)
+        buffer = load_buffer(args.dim, 10000, buffer, prior_model, energy, device, dtype)
+        buffer_ls = load_buffer(args.dim, 10000, buffer_ls, prior_model, energy, device, dtype)
         
         
         gfn_model.train()
@@ -260,16 +260,43 @@ if __name__ == "__main__":
             loss.backward()
             gfn_optimizer.step()
             print(f"Round: {round+1}\tEpoch: {i+1}\tLoss: {loss.item():.3f}")
-    
-        X_sample = diffusion_sampler.sample(batch_size, track_gradient=False)         
+
+        
+        X_sample_total = []
+        logR_sample_total = []
+        for _ in tqdm(range(args.M)): #NOTE we sample batchsize * M * M samples total
+            X_sample = diffusion_sampler.sample(batch_size, track_gradient=False)
+            logr = proxy_model_ens.log_reward(X_sample)
+            X_sample_total.append(X_sample)
+            logR_sample_total.append(logr)
+        X_sample = torch.cat(X_sample_total, dim=0)
+        logR_sample = torch.cat(logR_sample_total, dim=0)
+        
+        #filter largest logR sample with batchsize
+        X_sample = X_sample[torch.argsort(logR_sample, descending=True)[:batch_size]]                     
         print(f"Round: {round+1}\tPosterior model trained")
 
+        #---------------------------------------------------------------------------
+        ## Evaluation Part
+        EVALUATION_BATCH_SIZE = 100
+        X_sample_flow = prior_model.sample(EVALUATION_BATCH_SIZE, track_gradient=False)
+        X_sample_flow_unnorm = X_sample_flow * test_function.X_std + test_function.X_mean
+        X_sample_flow_unnorm = torch.clamp(X_sample_flow_unnorm, 0.0, 1.0)
+        
+        
+        X_sample_sampler = diffusion_sampler.sample(EVALUATION_BATCH_SIZE, track_gradient=False)
+        X_sample_sampler_unnorm = X_sample_sampler * test_function.X_std + test_function.X_mean
+        X_sample_sampler_unnorm = torch.clamp(X_sample_sampler_unnorm, 0.0, 1.0)
+        
+        Y_sample_flow = torch.tensor([test_function.eval_objective(x) for x in X_sample_flow_unnorm], dtype=dtype, device=device).unsqueeze(-1)
+        Y_sample_sampler = torch.tensor([test_function.eval_objective(x) for x in X_sample_sampler_unnorm], dtype=dtype, device=device).unsqueeze(-1)
+        
+        #compare flow and sampler
+        print(f"Round: {round+1}\tFlow max: {Y_sample_flow.max().item():.3f}\tSampler max: {Y_sample_sampler.max().item():.3f}")
+        print(f"Round: {round+1}\tFlow mean: {Y_sample_flow.mean().item():.3f}\tSampler mean: {Y_sample_sampler.mean().item():.3f}")
 
+        #---------------------------------------------------------------------------
 
-
-
-
-        # X_sample = prior_model.sample(batch_size, step_size=args.flow_steps, track_gradient=False)
         X_sample_unnorm = X_sample * test_function.X_std + test_function.X_mean
         X_sample_unnorm = torch.clamp(X_sample_unnorm, 0.0, 1.0)
         Y_sample_unnorm = torch.tensor([test_function.eval_objective(x) for x in X_sample_unnorm], dtype=dtype, device=device).unsqueeze(-1)        
@@ -297,17 +324,17 @@ if __name__ == "__main__":
         X_total = np.concatenate([X_total, X_sample_unnorm.cpu().numpy()], axis=0)
         Y_total = np.concatenate([Y_total, Y_sample_unnorm.cpu().numpy()], axis=0)
         
-        # wandb.log({
-        #     "Round": round + 1,
-        #     "Max so far": test_function.Y.max().item(),
-        #     "Max in this round": Y_sample_unnorm.max().item(),
-        #     "Min Constraint so far": test_function.C.min().item(),
-        #     "Min Constraint in this round": C_sample_unnorm.min().item(),
-        #     "Max Log rewards": proxy_model_ens.log_reward(test_function.X).max().item(),
-        #     "Max True score": test_function.true_score.max().item(),
-        #     "Time taken": time.time() - start_time,
-        #     "Seed": seed,
-        # })
+        wandb.log({
+            "Round": round + 1,
+            "Max so far": test_function.Y.max().item(),
+            "Max in this round": Y_sample_unnorm.max().item(),
+            "Min Constraint so far": test_function.C.min().item(),
+            "Min Constraint in this round": C_sample_unnorm.min().item(),
+            "Max Log rewards": proxy_model_ens.log_reward(test_function.X).max().item(),
+            "Max True score": test_function.true_score.max().item(),
+            "Time taken": time.time() - start_time,
+            "Seed": seed,
+        })
         
         
         # if len(Y_total) >= 1000:

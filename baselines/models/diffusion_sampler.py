@@ -31,14 +31,18 @@ class DiffusionSampler:
         return loss
 
     def sample(self, batch_size, track_gradient):
-        # Sample from the gfn_sampler
+        """
+        Directly sample from z ~ sampler, return f(z)
+        """
         z = self.sampler.sample(batch_size, self.energy.log_reward)
         x = self.prior.sample_with_noise(z, track_gradient)
         return x
     
 
 class Energy():
-    
+    """
+    Directly compute the r(f(z))
+    """
     def __init__(self, proxy, prior, beta):
         self.proxy = proxy
         self.prior = prior
@@ -46,5 +50,5 @@ class Energy():
         
     def log_reward(self, z):
         reward = reward = torch.distributions.Normal(loc=0, scale=1).log_prob(z).sum(dim=1)
-        reward += self.beta * self.proxy.log_reward(self.prior.sample_with_noise(z))
+        reward += self.proxy.log_reward(self.prior.sample_with_noise(z), beta=self.beta)
         return reward
