@@ -51,7 +51,7 @@ if __name__ == "__main__":
     # parser.add_argument('--batch_size', type=int, default=300)
     parser.add_argument('--epochs', type=int, default=25000)
     # parser.add_argument('--buffer_size', type=int, default=300 * 1000 * 2)
-    parser.add_argument('--sampler_steps', type=int, default=100)
+    parser.add_argument('--T', type=int, default=100)
     parser.add_argument('--subtb_lambda', type=int, default=2)
     parser.add_argument('--t_scale', type=float, default=5.)
     parser.add_argument('--log_var_range', type=float, default=4.)
@@ -226,7 +226,7 @@ if __name__ == "__main__":
         
         # Diffusion Sampler Training Part
         gfn_model = GFN(dim, args.s_emb_dim, args.hidden_dim, args.harmonics_dim, args.t_emb_dim,
-                        trajectory_length=args.sampler_steps, clipping=args.clipping, lgv_clip=args.lgv_clip, gfn_clip=args.gfn_clip,
+                        trajectory_length=args.T, clipping=args.clipping, lgv_clip=args.lgv_clip, gfn_clip=args.gfn_clip,
                         langevin=args.langevin, learned_variance=args.learned_variance,
                         partial_energy=args.partial_energy, log_var_range=args.log_var_range,
                         pb_scale_range=args.pb_scale_range,
