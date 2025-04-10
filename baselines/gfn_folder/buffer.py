@@ -155,13 +155,10 @@ class ReplayBuffer():
         return sample.detach(), reward.detach()
     
     
-def load_buffer(x_dim, load_size, buffer, flow_model, step_size, proxy_model):
+def load_buffer(x_dim, load_size, buffer, flow_model, step_size, energy):
     # get (load_size, x_dim) samples from the normal distribution
     z = torch.randn(load_size, x_dim, device=flow_model.device, dtype=flow_model.dtype) 
-    # get the samples from the flow model
-    x = flow_model.sample_with_noise(z, step_size)
-    # get the rewards from the proxy model
-    rewards = proxy_model.log_reward(x)
+    rewards = energy.log_reward(z)
     # add the samples and rewards to the buffer
     buffer.add(z, rewards)
     return buffer

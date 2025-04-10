@@ -387,8 +387,7 @@ class GFN(nn.Module):
                 self.flow_model = FlowModel(s_emb_dim, t_dim, hidden_dim, 1)
             else:
                 self.flow_model = torch.nn.Parameter(torch.tensor(0.).to(self.device))
-            self.flow_model = torch.nn.Parameter(torch.tensor(0.).to(self.device))
-
+            
             if self.langevin_scaling_per_dimension:
                 self.langevin_scaling_model = LangevinScalingModel(s_emb_dim, t_dim, hidden_dim, dim, zero_init)
             else:
