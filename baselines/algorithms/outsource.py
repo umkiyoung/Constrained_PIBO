@@ -245,8 +245,8 @@ if __name__ == "__main__":
                             rank_weight=args.rank_weight, prioritized=args.prioritized)
         buffer_ls = ReplayBuffer(args.buffer_size, device, proxy_model_ens, args.batch_size, data_ndim=dim, beta=args.beta,
                             rank_weight=args.rank_weight, prioritized=args.prioritized)
-        buffer = load_buffer(args.dim, 10000, buffer, prior_model, energy, device, dtype)
-        buffer_ls = load_buffer(args.dim, 10000, buffer_ls, prior_model, energy, device, dtype)
+        buffer = load_buffer(args.dim, 10000, buffer, energy, device, dtype)
+        buffer_ls = load_buffer(args.dim, 10000, buffer_ls, energy, device, dtype)
         
         
         gfn_model.train()
