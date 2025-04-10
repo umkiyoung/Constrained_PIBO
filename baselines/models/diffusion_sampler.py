@@ -4,8 +4,9 @@ from baselines.gfn_folder.gfn_train import *
 
 
 class DiffusionSampler:
-    def __init__(self, Energy, gfn_sampler, buffer, buffer_ls, device, batch_size, args, beta=1):
-        self.energy = Energy
+    def __init__(self, energy, prior, gfn_sampler, buffer, buffer_ls, device, batch_size, args, beta=1):
+        self.energy = energy
+        self.prior = prior
         self.sampler = gfn_sampler
         self.beta = beta
         self.bsz = batch_size

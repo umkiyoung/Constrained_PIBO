@@ -252,7 +252,7 @@ if __name__ == "__main__":
         gfn_model.train()
         
         
-        diffusion_sampler = DiffusionSampler(energy, gfn_model, buffer, buffer_ls, device, args.batch_size, args,beta=1)
+        diffusion_sampler = DiffusionSampler(energy, prior_model, gfn_model, buffer, buffer_ls, device, args.batch_size, args,beta=1)
         for i in trange(num_posterior_epochs+1):
  
             loss = diffusion_sampler.train(i)
