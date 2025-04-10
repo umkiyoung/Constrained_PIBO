@@ -1,7 +1,7 @@
 import torch
 from torch import nn, Tensor
 class FlowModel(nn.Module):
-    def __init__(self, x_dim: int = 2, hidden_dim: int = 512, device: str = 'cpu', dtype: torch.dtype = torch.float64):
+    def __init__(self, x_dim: int = 2, hidden_dim: int = 512, step_size: int = 30, device: str = 'cpu', dtype: torch.dtype = torch.float64):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(x_dim + 1, hidden_dim), nn.ELU(),
@@ -13,6 +13,7 @@ class FlowModel(nn.Module):
         self.loss_function = nn.MSELoss()
         self.device = device
         self.dtype = dtype
+        self.step_size = step_size
 
     def forward(self, x_t: Tensor, t: Tensor) -> Tensor:
         return self.net(torch.cat((t, x_t), -1))
@@ -23,20 +24,20 @@ class FlowModel(nn.Module):
         return x_t + (t_end - t_start) * self(x_t + self(x_t, t_start) * (t_end - t_start) / 2,
                                           t_start + (t_end - t_start) / 2)
     
-    def sample(self, batch_size: int, step_size: int, track_gradient: bool = False) -> Tensor:
+    def sample(self, batch_size: int, track_gradient: bool = False) -> Tensor:
         x = torch.randn(batch_size, self.x_dim, device=self.device, dtype=self.dtype)
-        time_steps = torch.linspace(0, 1.0, step_size + 1, device=self.device, dtype=self.dtype)
+        time_steps = torch.linspace(0, 1.0, self.step_size + 1, device=self.device, dtype=self.dtype)
         
-        for i in range(step_size):
+        for i in range(self.step_size):
             x = self.step(x, time_steps[i], time_steps[i + 1])
             if track_gradient == False:
                 x = x.detach()
         return x
     # add
-    def sample_with_noise(self, z, step_size = 10, track_gradient: bool = False ):
-        time_steps = torch.linspace(0, 1.0, step_size + 1, device=self.device, dtype=self.dtype)
+    def sample_with_noise(self, z, track_gradient: bool = False ):
+        time_steps = torch.linspace(0, 1.0, self.step_size + 1, device=self.device, dtype=self.dtype)
         
-        for i in range(step_size):
+        for i in range(self.step_size):
             nest_z = self.step(z, time_steps[i], time_steps[i + 1])
             if track_gradient == False:
                 z = nest_z.detach()

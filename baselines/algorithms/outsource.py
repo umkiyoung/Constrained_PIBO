@@ -6,15 +6,16 @@ import numpy as np
 from tqdm import tqdm
 import torch
 from torch.utils.data import DataLoader, WeightedRandomSampler
+from baselines.models.gfn import *
 
 from baselines.models.flow import FlowModel
 from baselines.functions.test_function import TestFunction
 from baselines.models.value_functions import ProxyEnsemble, Proxy 
 from baselines.utils import save_numpy_array, set_seed, get_value_based_weights, get_rank_based_weights
+from baselines.gfn_folder.buffer import load_buffer
 import wandb
-
-from baselines.models.gfn import *
 from baselines.models.diffusion_sampler import *
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", type=str, default="Ackley")
@@ -132,7 +133,8 @@ if __name__ == "__main__":
     batch_size = args.batch_size
     n_init = args.n_init
     seed = args.seed
-    dtype = torch.double
+    # dtype = torch.double
+    dtype = torch.float32
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     set_seed(seed)
@@ -203,7 +205,7 @@ if __name__ == "__main__":
         
   
         # Flow model Training Part
-        prior_model = FlowModel(x_dim=dim, hidden_dim=512, device=device, dtype=dtype).to(dtype=dtype, device=device)
+        prior_model = FlowModel(x_dim=dim, hidden_dim=512, step_size=args.flow_steps, device=device, dtype=dtype).to(dtype=dtype, device=device)
         prior_model_optimizer = torch.optim.Adam(prior_model.parameters(), lr=1e-3)
         prior_model.train()
         for epoch in tqdm(range(num_prior_epochs), dynamic_ncols=True):
@@ -242,28 +244,24 @@ if __name__ == "__main__":
                             rank_weight=args.rank_weight, prioritized=args.prioritized)
         buffer_ls = ReplayBuffer(args.buffer_size, device, proxy_model_ens, args.batch_size, data_ndim=dim, beta=args.beta,
                             rank_weight=args.rank_weight, prioritized=args.prioritized)
+        buffer = load_buffer(args.dim, 10000, buffer, prior_model, args.flow_steps, proxy_model_ens)
+        buffer_ls = load_buffer(args.dim, 10000, buffer_ls, prior_model, args.flow_steps, proxy_model_ens)
+        
+        energy = Energy(proxy_model_ens, prior_model, beta=args.beta)
+        
         gfn_model.train()
         
         
-        diffusion_sampler = DiffusionSampler(prior_model,proxy_model_ens, gfn_model, gfn_optimizer,  buffer, buffer_ls, device, args.batch_size, args,beta=1)
+        diffusion_sampler = DiffusionSampler(energy, gfn_model, buffer, buffer_ls, device, args.batch_size, args,beta=1)
         for i in trange(num_posterior_epochs+1):
  
-            loss = diffusion_sampler.forward_tb(i)
+            loss = diffusion_sampler.train(i)
            
             loss.backward()
             gfn_optimizer.step()
+            print(f"Round: {round+1}\tEpoch: {i+1}\tLoss: {loss.item():.3f}")
     
-    
-        X_sample = diffusion_sampler.sample(batch_size, proxy_model_ens.log_reward, step_size = args.flow_steps, track_gradient=False)         
-        # Reward: Diffusion sampler z ~ sampler, x ~ flow (z), y = proxy(x)  Reward Modeling         
-        # Diffsuion sampler Training
-        # --------------------
-        # Diffusion sampler -> sampling
-        
-        # 얘를 Flow -> 집어넣고
-        # 거기서 나온 X -> 가져와서 Y test_function에서 구하고 
-
-        # Score 구하고 데이터 셋 에넣고 저장하고
+        X_sample = diffusion_sampler.sample(batch_size, track_gradient=False)         
         print(f"Round: {round+1}\tPosterior model trained")
 
 

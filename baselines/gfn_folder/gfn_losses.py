@@ -2,35 +2,16 @@ import torch
 from torch.distributions import Normal
 
 
-def fwd_tb(prior, initial_state, gfn, log_reward_fn, exploration_std=None, return_exp = False):
-    # states, log_pfs, log_pbs, log_fs = gfn.get_trajectory_fwd(initial_state, exploration_std, log_reward_fn)
-    # states, log_pfs, log_pbs, z = gfn.get_trajectory_fwd(initial_state, exploration_std, log_reward_fn)
-    # with torch.no_grad():
-    #     log_r = log_reward_fn(states[:, -1]).detach()
-
-    # # loss = 0.5 * ((log_pfs.sum(-1) + log_fs[:, 0] - log_pbs.sum(-1) - log_r) ** 2)
-    # loss = 0.5 * ((log_pfs.sum(-1) + z - log_pbs.sum(-1) - log_r) ** 2)
-    # if return_exp:
-    #     return loss.mean(), states, log_pfs, log_pbs, log_r
-    # else:
-        
-    #     return loss.mean()
-    states, log_pfs, log_pbs, z = gfn.get_trajectory_fwd(initial_state, exploration_std, log_reward_fn)
-    x = states[:,-1]
-
-    # tb loss
+def fwd_tb(initial_state, gfn, log_reward_fn, exploration_std=None, return_exp = False):
+    states, log_pfs, log_pbs, log_fs = gfn.get_trajectory_fwd(initial_state, exploration_std, log_reward_fn)
     with torch.no_grad():
-        log_r = reward_call(x, log_reward_fn, prior, beta=1).detach()
-    
-    loss = 0.5 * ((log_pfs.sum(-1) + z - log_pbs.sum(-1) - log_r) ** 2)
+        log_r = log_reward_fn(states[:, -1]).detach()
+    loss = 0.5 * ((log_pfs.sum(-1) + log_fs[:, 0] - log_pbs.sum(-1) - log_r) ** 2)
 
-    return loss.mean()
-
-def reward_call(z, log_reward_fn, prior, beta):
-        reward = torch.distributions.Normal(loc=0, scale=1).log_prob(z).sum(dim=1)
-   
-        reward += torch.exp(beta * log_reward_fn( prior.sample_with_noise(z) ) )
-        return reward
+    if return_exp:
+        return loss.mean(), states, log_pfs, log_pbs, log_r
+    else:
+        return loss.mean()
 
 def bwd_tb(initial_state, gfn, log_reward_fn, exploration_std=None):
     states, log_pfs, log_pbs, log_fs = gfn.get_trajectory_bwd(initial_state, exploration_std, log_reward_fn)
@@ -74,7 +55,6 @@ def db(initial_state, gfn, log_reward_fn, exploration_std=None, return_exp = Fal
     if return_exp:
         return loss.mean(), states, log_pfs, log_pbs, log_fs[:, -1]
     else:
-        
         return loss.mean()
 
 

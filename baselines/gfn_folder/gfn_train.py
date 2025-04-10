@@ -25,7 +25,7 @@ def get_exploration_std(iter, exploratory, exploration_factor=0.1, exploration_w
     expl = lambda x: exploration_std
     return expl
 
-def train_step(energy, gfn_model, gfn_optimizer, it, exploratory, buffer, buffer_ls, exploration_factor, exploration_wd, prior, args,device):
+def train_step(energy, gfn_model, it, exploratory, buffer, buffer_ls, exploration_factor, exploration_wd, args,device):
     gfn_model.zero_grad()
 
     exploration_std = get_exploration_std(it, exploratory, exploration_factor, exploration_wd)
@@ -33,29 +33,27 @@ def train_step(energy, gfn_model, gfn_optimizer, it, exploratory, buffer, buffer
     if args.both_ways:
         if it % 2 == 0:
             if args.sampling == 'buffer':
-                loss, states, _, _, log_r  = fwd_train_step(prior, energy, gfn_model, exploration_std,args, device, return_exp=True)
+                loss, states, _, _, log_r  = fwd_train_step(energy, gfn_model, exploration_std,args, device, return_exp=True)
                 buffer.add(states[:, -1],log_r)
             else:
-                loss = fwd_train_step(prior, energy, gfn_model, exploration_std,args, device)
+                loss = fwd_train_step(energy, gfn_model, exploration_std,args, device)
         else:
             loss = bwd_train_step(energy, gfn_model, buffer, buffer_ls, args, device, exploration_std, it=it)
 
     elif args.bwd:
         loss = bwd_train_step(energy, gfn_model, buffer, buffer_ls,  args, device,exploration_std, it=it)
     else:
-        loss = fwd_train_step(prior, energy, gfn_model, exploration_std,args,device)
+        loss = fwd_train_step(energy, gfn_model, exploration_std,args,device)
 
-    # loss.backward()
-    # gfn_optimizer.step()
-    return loss #loss.item()
 
-def fwd_train_step(prior, energy, gfn_model, exploration_std, args, device, return_exp=False):
+    return loss
+
+def fwd_train_step(energy, gfn_model, exploration_std, args, device, return_exp=False):
     # init_state = torch.zeros(args.batch_size, energy.data_ndim).to(device)
     init_state = torch.zeros(args.batch_size, args.dim).to(device)
     coeff_matrix = cal_subtb_coef_matrix(args.subtb_lambda, args.T).to(device) # 추가
-    loss = get_gfn_forward_loss(prior, args.mode_fwd, init_state, gfn_model, energy.log_reward, coeff_matrix,
+    loss = get_gfn_forward_loss(args.mode_fwd, init_state, gfn_model, energy.log_reward, coeff_matrix,
                                 exploration_std=exploration_std, return_exp=return_exp)
-    print(f'loss:{loss}')
     return loss
 
 def bwd_train_step(energy, gfn_model, buffer, buffer_ls, args, device, exploration_std=None,it=0):
@@ -77,9 +75,9 @@ def bwd_train_step(energy, gfn_model, buffer, buffer_ls, args, device, explorati
     loss = get_gfn_backward_loss(args.mode_bwd, samples, gfn_model, energy.log_reward,
                                 exploration_std=exploration_std)
     return loss
-def get_gfn_forward_loss(prior, mode, init_state, gfn_model, log_reward, coeff_matrix, exploration_std=None, return_exp=False):
+def get_gfn_forward_loss(mode, init_state, gfn_model, log_reward, coeff_matrix, exploration_std=None, return_exp=False):
     if mode == 'tb':
-        loss = fwd_tb(prior , init_state, gfn_model, log_reward, exploration_std, return_exp=return_exp)
+        loss = fwd_tb(init_state, gfn_model, log_reward, exploration_std, return_exp=return_exp)
     elif mode == 'tb-avg':
         loss = fwd_tb_avg(init_state, gfn_model, log_reward, exploration_std, return_exp=return_exp)
     elif mode == 'db':

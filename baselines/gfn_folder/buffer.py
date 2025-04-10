@@ -95,6 +95,7 @@ class ReplayBuffer():
         self.beta = beta
         self.rank_weight = rank_weight
         self.beta = beta
+        
     def add(self, samples,log_r):
         if self.reward_dataset is None:
             self.reward_dataset = RewardDataset(log_r.detach())
@@ -152,3 +153,15 @@ class ReplayBuffer():
             sample, reward = next(self.data_iter)
             
         return sample.detach(), reward.detach()
+    
+    
+def load_buffer(x_dim, load_size, buffer, flow_model, step_size, proxy_model):
+    # get (load_size, x_dim) samples from the normal distribution
+    z = torch.randn(load_size, x_dim, device=flow_model.device, dtype=flow_model.dtype) 
+    # get the samples from the flow model
+    x = flow_model.sample_with_noise(z, step_size)
+    # get the rewards from the proxy model
+    rewards = proxy_model.log_reward(x)
+    # add the samples and rewards to the buffer
+    buffer.add(z, rewards)
+    return buffer
