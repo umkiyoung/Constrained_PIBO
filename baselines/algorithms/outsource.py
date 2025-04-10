@@ -34,13 +34,14 @@ if __name__ == "__main__":
     parser.add_argument("--proxy_hidden_dim", type=int, default=256)
     parser.add_argument("--gamma", type=float, default=1.0)
     parser.add_argument("--lamb", type=float, default=1.0)
+    parser.add_argument("--M", type=int, default=10)
+    parser.add_argument("--filtering", type=str, default="false", choices=('true', 'false'))
     parser.add_argument("--num_ensembles", type=int, default=5)
-    parser.add_argument("--training_posterior", type=str, default='both') # both, on, off
     parser.add_argument("--constraint_formulation", type=str, default="Lagrangian") # Soft, LogBarrier, Lagrangian
     parser.add_argument("--save_path", type=str, default="./baselines/algorithms/outsource/")
 
 
-    ################
+    ################################################################
     parser.add_argument('--lr_policy', type=float, default=1e-3)
     parser.add_argument('--lr_flow', type=float, default=1e-2)
     parser.add_argument('--lr_back', type=float, default=1e-3)
@@ -48,9 +49,9 @@ if __name__ == "__main__":
     parser.add_argument('--s_emb_dim', type=int, default=64)
     parser.add_argument('--t_emb_dim', type=int, default=64)
     parser.add_argument('--harmonics_dim', type=int, default=64)
-    # parser.add_argument('--batch_size', type=int, default=300)
+    parser.add_argument('--gfn_batch_size', type=int, default=300) #NOTE 100
     parser.add_argument('--epochs', type=int, default=25000)
-    # parser.add_argument('--buffer_size', type=int, default=300 * 1000 * 2)
+    parser.add_argument('--gfn_buffer_size', type=int, default=300 * 1000 * 2) #NOTE 1000
     parser.add_argument('--T', type=int, default=100)
     parser.add_argument('--subtb_lambda', type=int, default=2)
     parser.add_argument('--t_scale', type=float, default=5.)
@@ -183,6 +184,7 @@ if __name__ == "__main__":
                                         lamb=args.lamb).to(dtype=dtype, device=device)
         proxy_model_ens.gamma = args.gamma
 
+        #---------------------------------------------------------------------------
         # Proxy training part
         for proxy_model in proxy_model_ens.models:
             proxy_model_optimizer = torch.optim.Adam(proxy_model.parameters(), lr=1e-3)
@@ -203,7 +205,7 @@ if __name__ == "__main__":
 
         print(f"Round: {round+1}\tProxy model trained")
         
-  
+        #---------------------------------------------------------------------------
         # Flow model Training Part
         prior_model = FlowModel(x_dim=dim, hidden_dim=512, step_size=args.flow_steps, device=device, dtype=dtype).to(dtype=dtype, device=device)
         prior_model_optimizer = torch.optim.Adam(prior_model.parameters(), lr=1e-3)
@@ -220,10 +222,8 @@ if __name__ == "__main__":
                 total_loss += loss.item()
             # print(f"Round: {round+1}\tEpoch: {epoch+1}\tLoss: {total_loss:.3f}")
         print(f"Round: {round+1}\tPrior model trained")
-        
 
-        
-        
+        #---------------------------------------------------------------------------
         # Diffusion Sampler Training Part
         gfn_model = GFN(dim, args.s_emb_dim, args.hidden_dim, args.harmonics_dim, args.t_emb_dim,
                         trajectory_length=args.T, clipping=args.clipping, lgv_clip=args.lgv_clip, gfn_clip=args.gfn_clip,
@@ -234,25 +234,19 @@ if __name__ == "__main__":
                         conditional_flow_model=args.conditional_flow_model, learn_pb=args.learn_pb,
                         pis_architectures=args.pis_architectures, lgv_layers=args.lgv_layers,
                         joint_layers=args.joint_layers, zero_init=args.zero_init, device=device).to(device)
-
-
         gfn_optimizer = get_gfn_optimizer(gfn_model, args.lr_policy, args.lr_flow, args.lr_back, args.learn_pb,
                                         args.conditional_flow_model, args.use_weight_decay, args.weight_decay)
         metrics = dict()
         energy = Energy(proxy_model_ens, prior_model, beta=args.beta)
 
-        buffer = ReplayBuffer(args.buffer_size, device, proxy_model_ens, args.batch_size, data_ndim=dim, beta=args.beta,
+        buffer = ReplayBuffer(args.gfn_buffer_size, device, proxy_model_ens, args.gfn_batch_size, data_ndim=dim, beta=args.beta,
                             rank_weight=args.rank_weight, prioritized=args.prioritized)
-        buffer_ls = ReplayBuffer(args.buffer_size, device, proxy_model_ens, args.batch_size, data_ndim=dim, beta=args.beta,
+        buffer_ls = ReplayBuffer(args.gfn_buffer_size, device, proxy_model_ens, args.gfn_batch_size, data_ndim=dim, beta=args.beta,
                             rank_weight=args.rank_weight, prioritized=args.prioritized)
         buffer = load_buffer(args.dim, 10000, buffer, energy, device, dtype)
         buffer_ls = load_buffer(args.dim, 10000, buffer_ls, energy, device, dtype)
-        
-        
         gfn_model.train()
-        
-        
-        diffusion_sampler = DiffusionSampler(energy, prior_model, gfn_model, buffer, buffer_ls, device, args.batch_size, args,beta=1)
+        diffusion_sampler = DiffusionSampler(energy, prior_model, gfn_model, buffer, buffer_ls, device, args.gfn_batch_size, args,beta=1)
         for i in trange(num_posterior_epochs+1):
  
             loss = diffusion_sampler.train(i)
@@ -260,24 +254,28 @@ if __name__ == "__main__":
             loss.backward()
             gfn_optimizer.step()
             print(f"Round: {round+1}\tEpoch: {i+1}\tLoss: {loss.item():.3f}")
-
+        print(f"Round: {round+1}\tPosterior model trained")
         
+        #---------------------------------------------------------------------------
+        ## Sample from the diffusion sampler
         X_sample_total = []
         logR_sample_total = []
-        for _ in tqdm(range(args.M)): #NOTE we sample batchsize * M * M samples total
+        if args.filtering == "true":
+            for _ in tqdm(range(args.M)): #NOTE we sample batchsize * M * M samples total
+                X_sample = diffusion_sampler.sample(batch_size, track_gradient=False)
+                logr = proxy_model_ens.log_reward(X_sample)
+                X_sample_total.append(X_sample)
+                logR_sample_total.append(logr)
+            X_sample = torch.cat(X_sample_total, dim=0)
+            logR_sample = torch.cat(logR_sample_total, dim=0)
+            
+            #filter largest logR sample with batchsize
+            X_sample = X_sample[torch.argsort(logR_sample, descending=True)[:batch_size]] 
+        else:
             X_sample = diffusion_sampler.sample(batch_size, track_gradient=False)
-            logr = proxy_model_ens.log_reward(X_sample)
-            X_sample_total.append(X_sample)
-            logR_sample_total.append(logr)
-        X_sample = torch.cat(X_sample_total, dim=0)
-        logR_sample = torch.cat(logR_sample_total, dim=0)
-        
-        #filter largest logR sample with batchsize
-        X_sample = X_sample[torch.argsort(logR_sample, descending=True)[:batch_size]]                     
-        print(f"Round: {round+1}\tPosterior model trained")
 
         #---------------------------------------------------------------------------
-        ## Evaluation Part
+        ## Compare flow and sampler
         EVALUATION_BATCH_SIZE = 100
         X_sample_flow = prior_model.sample(EVALUATION_BATCH_SIZE, track_gradient=False)
         X_sample_flow_unnorm = X_sample_flow * test_function.X_std + test_function.X_mean
@@ -291,12 +289,11 @@ if __name__ == "__main__":
         Y_sample_flow = torch.tensor([test_function.eval_objective(x) for x in X_sample_flow_unnorm], dtype=dtype, device=device).unsqueeze(-1)
         Y_sample_sampler = torch.tensor([test_function.eval_objective(x) for x in X_sample_sampler_unnorm], dtype=dtype, device=device).unsqueeze(-1)
         
-        #compare flow and sampler
         print(f"Round: {round+1}\tFlow max: {Y_sample_flow.max().item():.3f}\tSampler max: {Y_sample_sampler.max().item():.3f}")
         print(f"Round: {round+1}\tFlow mean: {Y_sample_flow.mean().item():.3f}\tSampler mean: {Y_sample_sampler.mean().item():.3f}")
 
         #---------------------------------------------------------------------------
-
+        ## Evaluation Part
         X_sample_unnorm = X_sample * test_function.X_std + test_function.X_mean
         X_sample_unnorm = torch.clamp(X_sample_unnorm, 0.0, 1.0)
         Y_sample_unnorm = torch.tensor([test_function.eval_objective(x) for x in X_sample_unnorm], dtype=dtype, device=device).unsqueeze(-1)        
