@@ -239,9 +239,9 @@ if __name__ == "__main__":
         metrics = dict()
         energy = Energy(proxy_model_ens, prior_model, beta=args.beta)
 
-        buffer = ReplayBuffer(args.gfn_buffer_size, device, proxy_model_ens, args.gfn_batch_size, data_ndim=dim, beta=args.beta,
+        buffer = ReplayBuffer(args.gfn_buffer_size, device, energy, args.gfn_batch_size, data_ndim=dim, beta=args.beta,
                             rank_weight=args.rank_weight, prioritized=args.prioritized)
-        buffer_ls = ReplayBuffer(args.gfn_buffer_size, device, proxy_model_ens, args.gfn_batch_size, data_ndim=dim, beta=args.beta,
+        buffer_ls = ReplayBuffer(args.gfn_buffer_size, device, energy, args.gfn_batch_size, data_ndim=dim, beta=args.beta,
                             rank_weight=args.rank_weight, prioritized=args.prioritized)
         buffer = load_buffer(args.dim, 10000, buffer, energy, device, dtype)
         buffer_ls = load_buffer(args.dim, 10000, buffer_ls, energy, device, dtype)
