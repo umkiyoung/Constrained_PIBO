@@ -48,6 +48,36 @@ def train_step(energy, gfn_model, it, exploratory, buffer, buffer_ls, exploratio
 
     return loss
 
+def eval_step(eval_data, energy, gfn_model, final_eval=False, final_eval_data_size=None, eval_data_size = None, device = "cpu", args=None):
+    gfn_model.eval()
+    metrics = dict()
+    if final_eval:
+        init_state = torch.zeros(final_eval_data_size, energy.data_ndim).to(device)
+        samples, metrics['final_eval/log_Z'], metrics['final_eval/log_Z_lb'], metrics[
+            'final_eval/log_Z_learned'] = log_partition_function(
+            init_state, gfn_model, energy.log_reward)
+    else:
+        init_state = torch.zeros(eval_data_size, energy.data_ndim).to(device)
+        samples, metrics['eval/log_Z'], metrics['eval/log_Z_lb'], metrics[
+            'eval/log_Z_learned'] = log_partition_function(
+            init_state, gfn_model, energy.log_reward)
+    if eval_data is None:
+        log_elbo = None
+        sample_based_metrics = None
+    else:
+        if final_eval:
+            metrics['final_eval/mean_log_likelihood'] = 0. if args.mode_fwd == 'pis' else mean_log_likelihood(eval_data,
+                                                                                                              gfn_model,
+                                                                                                              energy.log_reward)
+        else:
+            metrics['eval/mean_log_likelihood'] = 0. if args.mode_fwd == 'pis' else mean_log_likelihood(eval_data,
+                                                                                                        gfn_model,
+                                                                                                        energy.log_reward)
+        metrics.update(get_sample_metrics(samples, eval_data, final_eval))
+    gfn_model.train()
+    return metrics
+
+
 def fwd_train_step(energy, gfn_model, exploration_std, args, device, return_exp=False):
     # init_state = torch.zeros(args.batch_size, energy.data_ndim).to(device)
     init_state = torch.zeros(args.batch_size, args.dim).to(device)

@@ -31,3 +31,8 @@ def get_sample_metrics(samples, gt_samples=None, final_eval=False):
         return
 
     return compute_distribution_distances(samples.unsqueeze(1), gt_samples.unsqueeze(1), final_eval)
+
+def final_eval(energy, gfn_model, final_eval_data_size, eval_step):
+    final_eval_data = energy.sample(final_eval_data_size)
+    results = eval_step(final_eval_data, energy, gfn_model, final_eval=True)
+    return results

@@ -8,11 +8,18 @@ import torch
 from torch.utils.data import DataLoader, WeightedRandomSampler
 from baselines.models.gfn import *
 
+
 from baselines.models.flow import FlowModel
 from baselines.functions.test_function import TestFunction
 from baselines.models.value_functions import ProxyEnsemble, Proxy 
 from baselines.utils import save_numpy_array, set_seed, get_value_based_weights, get_rank_based_weights
 from baselines.gfn_folder.buffer import load_buffer
+from baselines.gfn_folder.plot_utils import *
+from baselines.gfn_folder.energies import *
+from baselines.gfn_folder.gfn_train import *
+from baselines.gfn_folder.gfn_utils import *
+
+
 import wandb
 from baselines.models.diffusion_sampler import *
 
@@ -26,9 +33,9 @@ if __name__ == "__main__":
     parser.add_argument('--s_emb_dim', type=int, default=64)
     parser.add_argument('--t_emb_dim', type=int, default=64)
     parser.add_argument('--harmonics_dim', type=int, default=64)
-    parser.add_argument('--gfn_batch_size', type=int, default=300) #NOTE 100
+    parser.add_argument('--batch_size', type=int, default=300) #NOTE 100
     parser.add_argument('--epochs', type=int, default=25000)
-    parser.add_argument('--gfn_buffer_size', type=int, default=300 * 1000 * 2) #NOTE 1000
+    parser.add_argument('--buffer_size', type=int, default=300 * 1000 * 2) #NOTE 1000
     parser.add_argument('--T', type=int, default=100)
     parser.add_argument('--subtb_lambda', type=int, default=2)
     parser.add_argument('--t_scale', type=float, default=5.)
@@ -64,7 +71,7 @@ if __name__ == "__main__":
     # For replay buffer
     ################################################################
     # high beta give steep priorization in reward prioritized replay sampling
-    # parser.add_argument('--beta', type=float, default=1.)
+    parser.add_argument('--beta', type=float, default=1.)
 
     # low rank_weighted give steep priorization in rank-based replay sampling
     parser.add_argument('--rank_weight', type=float, default=1e-2)
@@ -93,21 +100,65 @@ if __name__ == "__main__":
     parser.add_argument('--pis_architectures', action='store_true', default=False)
     parser.add_argument('--lgv_layers', type=int, default=3)
     parser.add_argument('--joint_layers', type=int, default=2)
-    # parser.add_argument('--seed', type=int, default=12345)
+    parser.add_argument('--seed', type=int, default=12345)
     parser.add_argument('--weight_decay', type=float, default=1e-7)
     parser.add_argument('--use_weight_decay', action='store_true', default=False)
     parser.add_argument('--eval', action='store_true', default=False)
     args = parser.parse_args()
 
-
-
-    ################
-    wandb.init(project="diffusion_sampler",
-               config=vars(args))
+    def set_seed(seed):
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        random.seed(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        np.random.seed(seed)
     
-    #---------------------------------------------------------------------------
-    # Diffusion Sampler Training Part
-    gfn_model = GFN(dim, args.s_emb_dim, args.hidden_dim, args.harmonics_dim, args.t_emb_dim,
+    set_seed(args.seed)
+    
+    def get_energy(args, device):
+        if args.energy == '9gmm':
+            energy = NineGaussianMixture(device=device)
+        elif args.energy == '25gmm':
+            energy = TwentyFiveGaussianMixture(device=device)
+        elif args.energy == 'hard_funnel':
+            energy = HardFunnel(device=device)
+        elif args.energy == 'easy_funnel':
+            energy = EasyFunnel(device=device)
+        elif args.energy == 'many_well':
+            energy = ManyWell(device=device)
+        return energy
+    
+        
+    eval_data_size = 2000
+    final_eval_data_size = 2000
+    plot_data_size = 2000
+    final_plot_data_size = 2000
+    
+    if args.pis_architectures:
+        args.zero_init = True
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    coeff_matrix = cal_subtb_coef_matrix(args.subtb_lambda, args.T).to(device)
+
+    if args.both_ways and args.bwd:
+        args.bwd = False
+
+    if args.local_search:
+        args.both_ways = True
+
+    name = get_name(args)
+    energy = get_energy(args, device)
+    eval_data = energy.sample(eval_data_size).to(device)
+    
+    args.dim = energy.data_ndim
+    
+    config = args.__dict__
+    config["Experiment"] = "{args.energy}"
+    wandb.init(project="gfn-diffusion", config=config, name=name)
+    
+    gfn_model = GFN(energy.data_ndim, args.s_emb_dim, args.hidden_dim, args.harmonics_dim, args.t_emb_dim,
                     trajectory_length=args.T, clipping=args.clipping, lgv_clip=args.lgv_clip, gfn_clip=args.gfn_clip,
                     langevin=args.langevin, learned_variance=args.learned_variance,
                     partial_energy=args.partial_energy, log_var_range=args.log_var_range,
@@ -116,108 +167,31 @@ if __name__ == "__main__":
                     conditional_flow_model=args.conditional_flow_model, learn_pb=args.learn_pb,
                     pis_architectures=args.pis_architectures, lgv_layers=args.lgv_layers,
                     joint_layers=args.joint_layers, zero_init=args.zero_init, device=device).to(device)
+    
     gfn_optimizer = get_gfn_optimizer(gfn_model, args.lr_policy, args.lr_flow, args.lr_back, args.learn_pb,
-                                    args.conditional_flow_model, args.use_weight_decay, args.weight_decay)
+                                      args.conditional_flow_model, args.use_weight_decay, args.weight_decay)
+
+    print(gfn_model)
     metrics = dict()
-    energy = Energy(proxy_model_ens, prior_model, beta=args.beta)
 
-    buffer = ReplayBuffer(args.gfn_buffer_size, device, proxy_model_ens, args.gfn_batch_size, data_ndim=dim, beta=args.beta,
-                        rank_weight=args.rank_weight, prioritized=args.prioritized)
-    buffer_ls = ReplayBuffer(args.gfn_buffer_size, device, proxy_model_ens, args.gfn_batch_size, data_ndim=dim, beta=args.beta,
-                        rank_weight=args.rank_weight, prioritized=args.prioritized)
-    buffer = load_buffer(args.dim, 10000, buffer, energy, device, dtype)
-    buffer_ls = load_buffer(args.dim, 10000, buffer_ls, energy, device, dtype)
+    buffer = ReplayBuffer(args.buffer_size, device, energy.log_reward,args.batch_size, data_ndim=energy.data_ndim, beta=args.beta,
+                          rank_weight=args.rank_weight, prioritized=args.prioritized)
+    buffer_ls = ReplayBuffer(args.buffer_size, device, energy.log_reward,args.batch_size, data_ndim=energy.data_ndim, beta=args.beta,
+                          rank_weight=args.rank_weight, prioritized=args.prioritized)
     gfn_model.train()
-    diffusion_sampler = DiffusionSampler(energy, prior_model, gfn_model, buffer, buffer_ls, device, args.gfn_batch_size, args,beta=1)
-    for i in trange(num_posterior_epochs+1):
-
-        loss = diffusion_sampler.train(i)
-        
+    
+    for i in trange(args.epochs+1):
+        loss =  train_step(energy, gfn_model, i, args.exploratory,
+                                           buffer, buffer_ls, args.exploration_factor, args.exploration_wd, args, device)    
+        metrics['train/loss'] = loss.item()
         loss.backward()
         gfn_optimizer.step()
-        print(f"Round: {round+1}\tEpoch: {i+1}\tLoss: {loss.item():.3f}")
-    print(f"Round: {round+1}\tPosterior model trained")
-    
-    #---------------------------------------------------------------------------
-    ## Sample from the diffusion sampler
-    X_sample_total = []
-    logR_sample_total = []
-    if args.filtering == "true":
-        for _ in tqdm(range(args.M)): #NOTE we sample batchsize * M * M samples total
-            X_sample = diffusion_sampler.sample(batch_size, track_gradient=False)
-            logr = proxy_model_ens.log_reward(X_sample)
-            X_sample_total.append(X_sample)
-            logR_sample_total.append(logr)
-        X_sample = torch.cat(X_sample_total, dim=0)
-        logR_sample = torch.cat(logR_sample_total, dim=0)
-        
-        #filter largest logR sample with batchsize
-        X_sample = X_sample[torch.argsort(logR_sample, descending=True)[:batch_size]] 
-    else:
-        X_sample = diffusion_sampler.sample(batch_size, track_gradient=False)
+        if i % 100 == 0:
+            metrics.update(eval_step(eval_data, energy, gfn_model, final_eval=False, eval_data_size = eval_data_size, device = device, args=args))
+            images = plot_step(energy=energy, gfn_model=gfn_model, name=name, args=args, wandb=wandb, device=device, plot_data_size=plot_data_size)
+            metrics.update(images)
+            plt.close('all')
+            wandb.log(metrics, step=i)                
 
-    #---------------------------------------------------------------------------
-    ## Compare flow and sampler
-    EVALUATION_BATCH_SIZE = 100
-    X_sample_flow = prior_model.sample(EVALUATION_BATCH_SIZE, track_gradient=False)
-    X_sample_flow_unnorm = X_sample_flow * test_function.X_std + test_function.X_mean
-    X_sample_flow_unnorm = torch.clamp(X_sample_flow_unnorm, 0.0, 1.0)
-    
-    
-    X_sample_sampler = diffusion_sampler.sample(EVALUATION_BATCH_SIZE, track_gradient=False)
-    X_sample_sampler_unnorm = X_sample_sampler * test_function.X_std + test_function.X_mean
-    X_sample_sampler_unnorm = torch.clamp(X_sample_sampler_unnorm, 0.0, 1.0)
-    
-    Y_sample_flow = torch.tensor([test_function.eval_objective(x) for x in X_sample_flow_unnorm], dtype=dtype, device=device).unsqueeze(-1)
-    Y_sample_sampler = torch.tensor([test_function.eval_objective(x) for x in X_sample_sampler_unnorm], dtype=dtype, device=device).unsqueeze(-1)
-    
-    print(f"Round: {round+1}\tFlow max: {Y_sample_flow.max().item():.3f}\tSampler max: {Y_sample_sampler.max().item():.3f}")
-    print(f"Round: {round+1}\tFlow mean: {Y_sample_flow.mean().item():.3f}\tSampler mean: {Y_sample_sampler.mean().item():.3f}")
-
-    #---------------------------------------------------------------------------
-    ## Evaluation Part
-    X_sample_unnorm = X_sample * test_function.X_std + test_function.X_mean
-    X_sample_unnorm = torch.clamp(X_sample_unnorm, 0.0, 1.0)
-    Y_sample_unnorm = torch.tensor([test_function.eval_objective(x) for x in X_sample_unnorm], dtype=dtype, device=device).unsqueeze(-1)        
-    C_sample_unnorm = torch.cat([test_function.eval_constraints(x) for x in X_sample_unnorm], dim=0).to(dtype).to(device)
-    # print(f"Round: {round+1}\tSeed: {seed}\tMax in this round: {Y_sample_unnorm.max().item():.3f}")
-    true_score = torch.tensor([test_function.eval_score(x) for x in X_sample_unnorm], dtype=dtype, device=device).unsqueeze(-1)
-    print(f"Round: {round+1}\tSeed: {seed}\tMax in this round: {Y_sample_unnorm.max().item():.3f}\tMin Constraint: {C_sample_unnorm.min().item():.3f}\t Log_rewards: {proxy_model_ens.log_reward(X_sample_unnorm).max().item():.3f}\t True score: {true_score.max().item():.3f}")
-    
-    test_function.X = torch.cat([test_function.X, X_sample_unnorm], dim=0)
-    test_function.Y = torch.cat([test_function.Y, Y_sample_unnorm], dim=0)
-    test_function.C = torch.cat([test_function.C, C_sample_unnorm], dim=0)
-    
-    test_function.true_score = torch.cat([test_function.true_score, true_score], dim=0)
-    print(f"Round: {round+1}\tSeed: {seed}\tMax so far: {test_function.Y.max().item():.3f}\tMin Constraint: {test_function.C.min().item():.3f}\t Log_rewards: {proxy_model_ens.log_reward(test_function.X).max().item():.3f}\t True score: {test_function.true_score.max().item():.3f}")
-    # print(f"Round: {round+1}\tMax so far: {test_function.Y.max().item():.3f}")
-    
-    print(f"Time taken: {time.time() - start_time:.3f} seconds")
-    print()
-    
-    # Remove low-score samples in the training set (it seems cruical for the performance)
-    idx = torch.argsort(test_function.Y.squeeze(), descending=True)[:args.buffer_size]
-    test_function.X = test_function.X[idx]
-    test_function.Y = test_function.Y[idx]
-    print(len(test_function.X))
-    X_total = np.concatenate([X_total, X_sample_unnorm.cpu().numpy()], axis=0)
-    Y_total = np.concatenate([Y_total, Y_sample_unnorm.cpu().numpy()], axis=0)
-    
-    wandb.log({
-        "Round": round + 1,
-        "Max so far": test_function.Y.max().item(),
-        "Max in this round": Y_sample_unnorm.max().item(),
-        "Min Constraint so far": test_function.C.min().item(),
-        "Min Constraint in this round": C_sample_unnorm.min().item(),
-        "Max Log rewards": proxy_model_ens.log_reward(test_function.X).max().item(),
-        "Max True score": test_function.true_score.max().item(),
-        "Time taken": time.time() - start_time,
-        "Seed": seed,
-    })
-    
-    
-    # if len(Y_total) >= 1000:
-    save_len = min(len(Y_total) // 1000 * 1000, args.max_evals)
-    save_np = Y_total[:save_len]
-    file_name = f"outsource_{task}_{dim}_{seed}_{n_init}_{args.batch_size}_{args.buffer_size}_{args.num_ensembles}_{args.max_evals}_{save_len}.npy"
-    save_numpy_array(path=args.save_path, array=save_np, file_name=file_name)
+    eval_results = final_eval(energy, gfn_model, final_eval_data_size, eval_step).to(device)
+    metrics.update(eval_results)
