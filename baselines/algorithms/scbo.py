@@ -225,7 +225,7 @@ if __name__ == "__main__":
         return model
     
 
-while len(train_X) < max_evals:  # Run until TuRBO converges
+while len(total_X) < max_evals:  # Run until TuRBO converges
     # Fit GP models for objective and constraints
     
     # When restart is triggered, we need to reinitialize the state
@@ -304,6 +304,11 @@ while len(train_X) < max_evals:  # Run until TuRBO converges
     save_len = min(len(scores), max_evals)
     save_np = scores[:save_len].cpu().numpy()
     file_name = f"scbo_{task}_{dim}_{seed}_{n_init}_{batch_size}_{max_evals}_{len(scores)}.npy"
+    previous_file_name = f"scbo_{task}_{dim}_{seed}_{n_init}_{batch_size}_{max_evals}_{len(scores)-batch_size}.npy"
     save_numpy_array(path=args.save_path, array=save_np, file_name=file_name)
+    #remove previous files
+    #check if the previous file exists
+    if os.path.exists(os.path.join(args.save_path, previous_file_name)):
+        os.remove(os.path.join(args.save_path, previous_file_name))
     
     
