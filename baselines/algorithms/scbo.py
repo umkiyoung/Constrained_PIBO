@@ -56,7 +56,7 @@ if __name__ == "__main__":
         failure_counter: int = 0
         failure_tolerance: int = float("nan")  # Note: Post-initialized
         success_counter: int = 0
-        success_tolerance: int = 10  # Note: The original paper uses 3
+        success_tolerance: int = 3  # Note: The original paper uses 3
         best_value: float = -float("inf")
         best_constraint_values: Tensor = torch.ones(2, **tkwargs) * torch.inf
         restart_triggered: bool = False
@@ -87,7 +87,7 @@ if __name__ == "__main__":
         is_feas = (C <= 0).all(dim=-1)
         if is_feas.any():  # Choose best feasible candidate
             score = Y.clone()
-            score[~is_feas] = -float("ifnf")
+            score[~is_feas] = -float("inf")
             return score.argmax()
         return C.clamp(min=0).sum(dim=-1).argmin()
 
@@ -225,7 +225,7 @@ if __name__ == "__main__":
         return model
     
 
-while not state.restart_triggered and len(train_X) < max_evals:  # Run until TuRBO converges
+while len(train_X) < max_evals:  # Run until TuRBO converges
     # Fit GP models for objective and constraints
     
     # When restart is triggered, we need to reinitialize the state
@@ -301,7 +301,7 @@ while not state.restart_triggered and len(train_X) < max_evals:  # Run until TuR
         )
         
     # Save the results
-    save_len = min(len(scores) // 1000 * 1000, args.max_evals)
+    save_len = min(len(scores), max_evals)
     save_np = scores[:save_len].cpu().numpy()
     file_name = f"scbo_{task}_{dim}_{seed}_{n_init}_{batch_size}_{max_evals}_{len(scores)}.npy"
     save_numpy_array(path=args.save_path, array=save_np, file_name=file_name)
