@@ -38,7 +38,7 @@ if __name__ == "__main__":
     parser.add_argument("--filtering", type=str, default="false", choices=('true', 'false'))
     parser.add_argument("--num_ensembles", type=int, default=5)
     parser.add_argument("--constraint_formulation", type=str, default="Lagrangian") # Soft, LogBarrier, Lagrangian
-    parser.add_argument("--save_path", type=str, default="./baselines/algorithms/outsource/")
+    parser.add_argument("--save_path", type=str, default="./baselines/results/outsource/")
 
 
     ################################################################
