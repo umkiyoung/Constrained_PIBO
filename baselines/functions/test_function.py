@@ -112,6 +112,9 @@ class TestFunction(Dataset):
         normalized = (constraints - mean) / (std + 1e-7)
         zero_normalized = -mean / std
         return normalized - zero_normalized
+        
+        # unnormalized = normalized * std + mean
+        # return unnormalized    
     
     def __len__(self):
         return self.X.size(0)
